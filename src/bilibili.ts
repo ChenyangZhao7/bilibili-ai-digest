@@ -108,8 +108,7 @@ type ViewResponse = {
   };
 };
 
-export async function fetchVideoMeta(id: string, p: number, fetchImpl: FetchLike): Promise<VideoMeta> {
-  const param = /^\d+$/.test(id) ? `aid=${id}` : `bvid=${encodeURIComponent(id)}`;
+export async function fetchVideoMeta(id: string, p: number, fetchImpl: FetchLike): Promise<VideoMeta> {  const param = /^\d+$/.test(id) ? `aid=${id}` : `bvid=${encodeURIComponent(id)}`;
   const res = await fetchImpl(`https://api.bilibili.com/x/web-interface/view?${param}`, {
     headers: BILI_HEADERS(),
   });
@@ -147,4 +146,58 @@ export async function fetchVideoMeta(id: string, p: number, fetchImpl: FetchLike
     cover: data.pic ?? "",
     pageCount: pages.length,
   };
+}
+
+export type SubtitleResult =
+  | { ok: true; lang: string; cues: Cue[] }
+  | { ok: false; reason: "not_logged_in" | "risk_control" | "no_subtitle" | "http"; detail: string };
+
+type PlayerResponse = {
+  code: number;
+  message?: string;
+  data?: {
+    subtitle?: {
+      subtitles?: { lan: string; lan_doc?: string; subtitle_url?: string }[];
+    };
+  };
+};
+
+type SubtitleBody = { body?: { from: number; to: number; content: string }[] };
+
+export async function fetchSubtitle(
+  bvid: string,
+  cid: number,
+  cookie: string | null,
+  fetchImpl: FetchLike,
+): Promise<SubtitleResult> {
+  if (!cookie) return { ok: false, reason: "not_logged_in", detail: "还没有登录 B站" };
+
+  const res = await fetchImpl(
+    `https://api.bilibili.com/x/player/v2?bvid=${encodeURIComponent(bvid)}&cid=${cid}`,
+    { headers: BILI_HEADERS({ Cookie: cookie }) },
+  );
+  if (!res.ok) return { ok: false, reason: "http", detail: `B站接口返回 HTTP ${res.status}` };
+  const json = (await res.json()) as PlayerResponse;
+
+  if (json.code === -101) return { ok: false, reason: "not_logged_in", detail: "登录已过期，需要重新扫码" };
+  if (json.code === -352 || json.code === -412) {
+    return { ok: false, reason: "risk_control", detail: "B站限流了，等我一会儿再试" };
+  }
+  if (json.code !== 0) return { ok: false, reason: "http", detail: `B站返回错误：${json.message ?? json.code}` };
+
+  const list = json.data?.subtitle?.subtitles ?? [];
+  if (list.length === 0) return { ok: false, reason: "no_subtitle", detail: "这个视频没有字幕" };
+
+  const picked = list.find((s) => s.lan === "ai-zh") ?? list.find((s) => s.lan.includes("zh")) ?? list[0];
+  if (!picked.subtitle_url) return { ok: false, reason: "no_subtitle", detail: "字幕地址为空" };
+
+  const url = picked.subtitle_url.startsWith("//") ? `https:${picked.subtitle_url}` : picked.subtitle_url;
+  const subRes = await fetchImpl(url, { headers: BILI_HEADERS() });
+  if (!subRes.ok) return { ok: false, reason: "http", detail: `字幕文件下载失败 HTTP ${subRes.status}` };
+  const body = (await subRes.json()) as SubtitleBody;
+
+  const cues: Cue[] = (body.body ?? []).map((c) => ({ from: c.from, to: c.to, text: c.content }));
+  if (cues.length === 0) return { ok: false, reason: "no_subtitle", detail: "字幕内容为空" };
+
+  return { ok: true, lang: picked.lan, cues };
 }

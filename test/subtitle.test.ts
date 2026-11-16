@@ -1,0 +1,88 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { fetchSubtitle } from "../src/bilibili.ts";
+import {
+  cuesToParagraphs,
+  paragraphsToTimestampedText,
+  secondsToClock,
+  mergeParagraphsForChunks,
+} from "../src/subtitle.ts";
+import body from "./fixtures/subtitle-body.json" with { type: "json" };
+
+test("协议相对字幕地址补成 https 且带 Referer", async () => {
+  const calls: { url: string; headers: Record<string, string> }[] = [];
+  const fake = async (url: string, init?: RequestInit) => {
+    calls.push({ url, headers: (init?.headers ?? {}) as Record<string, string> });
+    if (url.includes("/x/player/v2")) {
+      return new Response(
+        JSON.stringify({
+          code: 0,
+          data: {
+            subtitle: {
+              subtitles: [
+                { lan: "ai-zh", lan_doc: "中文（自动生成）", subtitle_url: "//aisubtitle.hdslb.com/x.json" },
+              ],
+            },
+          },
+        }),
+      );
+    }
+    return new Response(JSON.stringify(body));
+  };
+  const res = await fetchSubtitle("BV1GJ411x7h7", 1, "SESSDATA=s", fake as never);
+  assert.equal(res.ok, true);
+  assert.equal(calls[1].url, "https://aisubtitle.hdslb.com/x.json");
+  assert.equal(calls[1].headers.Referer, "https://www.bilibili.com/");
+  assert.equal(calls[0].headers.Cookie, "SESSDATA=s");
+  if (res.ok) {
+    assert.equal(res.lang, "ai-zh");
+    assert.equal(res.cues[0].text, "第一句。");
+  }
+});
+
+test("未登录 / 风控 / 无字幕三种失败要区分", async () => {
+  const mk = (payload: unknown) => async () => new Response(JSON.stringify(payload));
+  const notLoggedIn = await fetchSubtitle("B", 1, "SESSDATA=s", mk({ code: -101, message: "账号未登录" }) as never);
+  const risk = await fetchSubtitle("B", 1, "SESSDATA=s", mk({ code: -352 }) as never);
+  const none = await fetchSubtitle(
+    "B",
+    1,
+    "SESSDATA=s",
+    mk({ code: 0, data: { subtitle: { subtitles: [] } } }) as never,
+  );
+  const noCookie = await fetchSubtitle("B", 1, null, mk({ code: 0 }) as never);
+  assert.equal(notLoggedIn.ok, false);
+  assert.equal(risk.ok, false);
+  assert.equal(none.ok, false);
+  if (!notLoggedIn.ok) assert.equal(notLoggedIn.reason, "not_logged_in");
+  if (!risk.ok) assert.equal(risk.reason, "risk_control");
+  if (!none.ok) assert.equal(none.reason, "no_subtitle");
+  if (!noCookie.ok) assert.equal(noCookie.reason, "not_logged_in");
+});
+
+test("分段：句末标点切开，静音 6 秒切开，单段不超 300 字", () => {
+  const cues = [
+    { from: 0, to: 2, text: "大家好" },
+    { from: 2, to: 4, text: "今天讲AI。" },
+    { from: 30, to: 32, text: "第二部分。" },
+    { from: 32, to: 34, text: "很长".repeat(200) },
+  ];
+  const paras = cuesToParagraphs(cues);
+  assert.equal(paras[0].text, "大家好今天讲AI。");
+  assert.equal(paras[1].start, 30);
+  assert.ok(paras.every((p) => p.text.length <= 300));
+  assert.equal(secondsToClock(3725), "62:05");
+  assert.ok(paragraphsToTimestampedText(paras).startsWith("[00:00]"));
+  assert.equal(paras[paras.length - 1].end, 34);
+});
+
+test("分块不丢段且每块在预算内", () => {
+  const paras = Array.from({ length: 40 }, (_, i) => ({
+    start: i * 10,
+    end: i * 10 + 9,
+    text: "字".repeat(200),
+  }));
+  const chunks = mergeParagraphsForChunks(paras, 1000);
+  assert.equal(chunks.flat().length, 40);
+  assert.ok(chunks.every((c) => c.reduce((n, p) => n + p.text.length, 0) <= 1000));
+});
