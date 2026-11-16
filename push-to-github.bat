@@ -12,7 +12,11 @@ if errorlevel 1 (
 )
 
 echo Step 1/2: configuring Git Credential Manager (a browser sign-in may open once).
-git credential-manager configure
+if exist "%ProgramFiles%\Git\mingw64\bin\git-credential-manager.exe" (
+  "%ProgramFiles%\Git\mingw64\bin\git-credential-manager.exe" configure
+) else (
+  git credential-manager configure
+)
 
 echo.
 echo Step 2/2: pushing main to https://github.com/ChenyangZhao7/video
