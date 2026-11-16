@@ -159,6 +159,14 @@ export function maskSecret(value: string): string {
   return `${value.slice(0, 4)}***${value.slice(-2)}`;
 }
 
+export function redactSecrets(text: string): string {
+  return text
+    .replace(/(SESSDATA=)([^;\s]+)/gi, (_m, prefix: string, value: string) => prefix + maskSecret(value))
+    .replace(/(bili_jct=)([^;\s]+)/gi, (_m, prefix: string, value: string) => prefix + maskSecret(value))
+    .replace(/(Bearer\s+)(\S+)/gi, (_m, prefix: string, value: string) => prefix + maskSecret(value))
+    .replace(/\bsk-[A-Za-z0-9_-]{6,}/g, (token) => maskSecret(token));
+}
+
 function parseCookie(raw: string | null): BiliCookie | null {
   if (!raw) return null;
   try {

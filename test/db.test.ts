@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   openDb,
   initSchema,
+  redactSecrets,
   setSetting,
   getSetting,
   getSettings,
@@ -22,6 +23,14 @@ import { saveCookie, loadSettings, saveLlmSettings, hasLlmKey } from "../src/set
 test("maskSecret 不泄露中间内容", () => {
   assert.equal(maskSecret("SESSDATAabcdefgh12345678"), "SESS***78");
   assert.equal(maskSecret("short"), "***");
+});
+
+test("redactSecrets 只抹掉密钥，不破坏中文错误文案", () => {
+  assert.equal(redactSecrets("认不出这个链接，支持 BV号"), "认不出这个链接，支持 BV号");
+  const redacted = redactSecrets("请求失败 SESSDATA=abc123def456; sk-abcdef123456789 无效");
+  assert.equal(redacted.includes("abc123def456"), false);
+  assert.equal(redacted.includes("abcdef123456789"), false);
+  assert.match(redacted, /请求失败/);
 });
 
 test("设置读写往返，getSettings 不返回明文 key", () => {
