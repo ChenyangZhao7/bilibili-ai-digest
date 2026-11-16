@@ -157,6 +157,7 @@ export function createApp(opts: AppOpts = {}) {
       markdown: report.markdown,
       payload,
       degraded: payload === null,
+      transcript: video?.transcriptText ?? "",
       meta: {
         title: video?.title ?? "",
         owner: video?.owner ?? "",
@@ -244,8 +245,27 @@ export function createApp(opts: AppOpts = {}) {
     }
   });
 
-  app.get("/api/auth/status", async (_req, res) => {
-    const cookie = getCookie(db);
+  app.post("/api/auth/manual", async (req, res) => {
+    try {
+      const sessdata = typeof req.body?.sessdata === "string" ? req.body.sessdata.trim() : "";
+      if (!sessdata) {
+        res.status(400).json({ error: "SESSDATA 是空的" });
+        return;
+      }
+      const cookie = { SESSDATA: sessdata, bili_jct: "", DedeUserID: "", buvid3: "" };
+      const who = await checkLogin(cookie, fetchImpl);
+      if (!who.isLogin) {
+        res.status(400).json({ error: "这个 SESSDATA 无效或已过期，重新复制一次" });
+        return;
+      }
+      saveCookie(db, cookie);
+      res.json({ ok: true, uname: who.uname });
+    } catch (err) {
+      errorResponse(res, err);
+    }
+  });
+
+  app.get("/api/auth/status", async (_req, res) => {    const cookie = getCookie(db);
     if (!cookie) {
       res.json({ isLogin: false, uname: null });
       return;

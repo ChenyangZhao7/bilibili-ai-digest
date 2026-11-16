@@ -1,0 +1,146 @@
+.report-head {
+  padding: 18px;
+  background: linear-gradient(180deg, #18202b, #141a22);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.report-head .badge {
+  display: inline-block;
+  margin-bottom: 10px;
+}
+
+.report-head h1 {
+  margin: 0 0 8px;
+  font-size: 22px;
+  line-height: 1.35;
+}
+
+.one-line {
+  margin: 0;
+  font-size: 17px;
+}
+
+.reason {
+  margin: 10px 0 0;
+  padding-left: 10px;
+  color: var(--muted);
+  border-left: 2px solid var(--border);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+h2.block-title {
+  margin: 26px 0 10px;
+  font-size: 15px;
+  color: var(--muted);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+ul.points {
+  margin: 0;
+  padding-left: 18px;
+}
+
+ul.points li {
+  margin: 4px 0;
+}
+
+.section-item {
+  padding: 14px 16px;
+  margin-bottom: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.section-item h3 {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.time-chip {
+  flex: none;
+  padding: 1px 7px;
+  color: var(--accent);
+  background: rgba(110, 168, 254, 0.1);
+  border: 1px solid rgba(110, 168, 254, 0.3);
+  border-radius: 5px;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 12px;
+}
+
+.highlight-item {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--border);
+}
+
+.highlight-item:last-child {
+  border-bottom: 0;
+}
+
+.highlight-item .why {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.term-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 14px;
+}
+
+.term-grid dt {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.term-grid dd {
+  margin: 0;
+  color: var(--muted);
+}
+
+.transcript {
+  max-height: 460px;
+  overflow: auto;
+  padding: 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 12.5px;
+  white-space: pre-wrap;
+}
+
+.warn-bar {
+  margin: 12px 0 0;
+  padding: 9px 12px;
+  color: var(--warn);
+  background: rgba(210, 153, 34, 0.1);
+  border: 1px solid rgba(210, 153, 34, 0.3);
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.degraded {
+  margin: 12px 0 0;
+  padding: 9px 12px;
+  color: var(--warn);
+  background: rgba(210, 153, 34, 0.1);
+  border: 1px solid rgba(210, 153, 34, 0.3);
+  border-radius: 8px;
+  font-size: 13px;
+}

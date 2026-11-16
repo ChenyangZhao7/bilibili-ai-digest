@@ -83,6 +83,39 @@ test("报告列表、详情、删除", async () => {
   assert.equal(one.markdown, "# 报告");
   assert.equal(one.meta.title, "标题");
   assert.equal(one.payload.tldr[0], "x");
+  assert.equal(typeof one.transcript, "string");
   assert.equal(del.ok, true);
   assert.equal(after.status, 404);
+});
+
+test("手动填 SESSDATA 会先校验再保存", async () => {
+  const { base, server, db } = await start({
+    fetchImpl: async (url: string) => {
+      if (url.includes("x/web-interface/nav")) {
+        return new Response(JSON.stringify({ code: 0, data: { isLogin: true, uname: "老王" } }));
+      }
+      return new Response(JSON.stringify({ code: 0 }));
+    },
+  });
+  const bad = await start({
+    fetchImpl: async () =>
+      new Response(JSON.stringify({ code: 0, data: { isLogin: false, uname: "" } })),
+  });
+  const ok = await fetch(`${base}/api/auth/manual`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ sessdata: "sessdata-value-123456" }),
+  }).then((r) => r.json());
+  const badRes = await fetch(`${bad.base}/api/auth/manual`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ sessdata: "expired" }),
+  });
+  server.close();
+  bad.server.close();
+  assert.equal(ok.ok, true);
+  assert.equal(ok.uname, "老王");
+  assert.equal(badRes.status, 400);
+  const stored = db.prepare("select value from settings where key='bili_cookie'").get() as { value: string };
+  assert.match(stored.value, /sessdata-value-123456/);
 });

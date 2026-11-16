@@ -12,7 +12,6 @@
   "dependencies": {
     "express": "^5.1.0",
     "ffmpeg-static": "^5.2.0",
-    "marked": "^16.4.0",
     "qrcode": "^1.5.4"
   }
 }
