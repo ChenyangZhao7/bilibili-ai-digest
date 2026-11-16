@@ -1,4 +1,5 @@
 import type { Cue, FetchLike } from "./types.ts";
+import { subtitleUsable, titleScore } from "./subtitle.ts";
 
 export type { FetchLike };
 
@@ -40,6 +41,76 @@ function biliError(kind: BiliError["kind"], message: string): Error {
 
 const BV_RE = /^BV[0-9A-Za-z]{10}$/;
 const AV_RE = /^av(\d+)$/i;
+
+export type SubtitlePick =
+  | { ok: true; cues: Cue[]; titleScore: number; attempts: number }
+  | { ok: false; reason: "not_logged_in" | "risk_control" | "no_subtitle" | "http" | "unreliable"; detail: string };
+
+export async function fetchBestSubtitle(args: {
+  bvid: string;
+  cid: number;
+  cookie: string | null;
+  duration: number;
+  title: string;
+  fetchImpl: FetchLike;
+  attempts?: number;
+  sleep?: (ms: number) => Promise<void>;
+}): Promise<SubtitlePick> {
+  const attempts = args.attempts ?? 12;
+  const sleep = args.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const groups = new Map<string, { cues: Cue[]; titleScore: number; count: number }>();
+  let lastFailure: Exclude<SubtitlePick, { ok: true }> | null = null;
+
+  for (let i = 0; i < attempts; i++) {
+    const res = await fetchSubtitle(args.bvid, args.cid, args.cookie, args.fetchImpl);
+
+    if (!res.ok) {
+      lastFailure = res;
+      if (res.reason === "not_logged_in") break;
+      if (res.reason === "risk_control") await sleep(300 * 3 ** i);
+      continue;
+    }
+
+    if (!subtitleUsable(res.cues, args.duration)) {
+      lastFailure = { ok: false, reason: "unreliable", detail: "字幕内容与视频对不上" };
+      continue;
+    }
+
+    const text = res.cues.map((c) => c.text).join("");
+    const score = titleScore(args.title, text);
+    const key = `${text.length}:${text.slice(0, 120)}`;
+    const existing = groups.get(key);
+    if (existing) existing.count += 1;
+    else groups.set(key, { cues: res.cues, titleScore: score, count: 1 });
+
+    const confident = [...groups.values()].some((g) => g.count >= 2 && g.titleScore >= 2);
+    if (confident && i >= 3) break;
+  }
+
+  if (groups.size > 0) {
+    const stable = [...groups.values()].filter((g) => g.count >= 2);
+    if (stable.length > 0) {
+      const ranked = [...stable].sort((a, b) => b.titleScore - a.titleScore || b.count - a.count);
+      const top = ranked[0];
+      const tied = ranked.filter((g) => g.titleScore === top.titleScore).length > 1;
+      if (stable.length === 1 || (top.titleScore >= 2 && !tied)) {
+        return { ok: true, cues: top.cues, titleScore: top.titleScore, attempts };
+      }
+      return {
+        ok: false,
+        reason: "unreliable",
+        detail: `B站返回了 ${stable.length} 份不同且都重复出现的字幕，无法确认哪份是真的`,
+      };
+    }
+    return {
+      ok: false,
+      reason: "unreliable",
+      detail: `B站连续 ${attempts} 次返回了 ${groups.size} 份互相不一致的字幕，无法确认哪份是真的`,
+    };
+  }
+  if (lastFailure) return lastFailure;
+  return { ok: false, reason: "no_subtitle", detail: "B站没有返回可用的字幕" };
+}
 
 export const MEDIA_HOST_SUFFIXES = [
   "hdslb.com",

@@ -69,6 +69,20 @@ const shortMetaResponse = (bvid: string, duration: number) =>
     },
   });
 
+const metaWithTitle = (bvid: string, title: string, duration = 600) =>
+  JSON.stringify({
+    code: 0,
+    data: {
+      bvid,
+      aid: 5,
+      title,
+      owner: { name: "UP主" },
+      duration,
+      pic: "",
+      pages: [{ cid: 51, page: 1, duration }],
+    },
+  });
+
 const llmResponse = () =>
   JSON.stringify({
     choices: [
@@ -100,7 +114,7 @@ test("有字幕时走快路，产出报告并跳过 ASR", async () => {
         }),
       );
     if (url.includes("//aisubtitle.hdslb.com/x.json"))
-      return new Response(JSON.stringify({ body: [{ from: 0, to: 5, content: "第一句话。".repeat(30) }] }));
+      return new Response(JSON.stringify({ body: [{ from: 0, to: 60, content: "第一句话。".repeat(30) }, { from: 60, to: 120, content: "第一句话。".repeat(30) }, { from: 120, to: 180, content: "第一句话。".repeat(30) }] }));
     return new Response(llmResponse());
   };
   const deps = depsWith({
@@ -162,7 +176,7 @@ test("失败任务保留断点，retry 从文字稿直接重新总结（不重�
         }),
       );
     if (url.includes("//aisubtitle.hdslb.com/x.json"))
-      return new Response(JSON.stringify({ body: [{ from: 0, to: 5, content: "足够长的内容。".repeat(30) }] }));
+      return new Response(JSON.stringify({ body: [{ from: 0, to: 60, content: "足够长的内容。".repeat(30) }, { from: 60, to: 120, content: "足够长的内容。".repeat(30) }, { from: 120, to: 180, content: "足够长的内容。".repeat(30) }] }));
     llmCalls++;
     if (llmCalls === 1) return new Response(JSON.stringify({ error: { message: "no key" } }), { status: 401 });
     return new Response(llmResponse());
@@ -196,7 +210,7 @@ test("24 小时内同视频复用已有报告，不重复抓取", async () => {
         }),
       );
     if (url.includes("//aisubtitle.hdslb.com/x.json"))
-      return new Response(JSON.stringify({ body: [{ from: 0, to: 5, content: "足够长的内容。".repeat(30) }] }));
+      return new Response(JSON.stringify({ body: [{ from: 0, to: 60, content: "足够长的内容。".repeat(30) }, { from: 60, to: 120, content: "足够长的内容。".repeat(30) }, { from: 120, to: 180, content: "足够长的内容。".repeat(30) }] }));
     return new Response(llmResponse());
   };
   const deps = depsWith({ fetchImpl: fake });
@@ -253,7 +267,7 @@ test("force 提交跳过复用，重新生成新报告", async () => {
         }),
       );
     if (url.includes("//aisubtitle.hdslb.com/x.json"))
-      return new Response(JSON.stringify({ body: [{ from: 0, to: 5, content: "足够长的内容。".repeat(30) }] }));
+      return new Response(JSON.stringify({ body: [{ from: 0, to: 60, content: "足够长的内容。".repeat(30) }, { from: 60, to: 120, content: "足够长的内容。".repeat(30) }, { from: 120, to: 180, content: "足够长的内容。".repeat(30) }] }));
     llmCalls++;
     return new Response(llmResponse());
   };
@@ -283,7 +297,7 @@ test("缓存了 P1 也不能拿来冒充 P2", async () => {
         }),
       );
     if (url.includes("//aisubtitle.hdslb.com/x.json"))
-      return new Response(JSON.stringify({ body: [{ from: 0, to: 5, content: "足够长的内容。".repeat(30) }] }));
+      return new Response(JSON.stringify({ body: [{ from: 0, to: 60, content: "足够长的内容。".repeat(30) }, { from: 60, to: 120, content: "足够长的内容。".repeat(30) }, { from: 120, to: 180, content: "足够长的内容。".repeat(30) }] }));
     return new Response(llmResponse());
   };
   const deps = depsWith({ fetchImpl: fake });
@@ -310,7 +324,7 @@ test("LLM 返回非 JSON 时报告标记 degraded 并落库", async () => {
         }),
       );
     if (url.includes("//aisubtitle.hdslb.com/x.json"))
-      return new Response(JSON.stringify({ body: [{ from: 0, to: 5, content: "足够长的内容。".repeat(30) }] }));
+      return new Response(JSON.stringify({ body: [{ from: 0, to: 60, content: "足够长的内容。".repeat(30) }, { from: 60, to: 120, content: "足够长的内容。".repeat(30) }, { from: 120, to: 180, content: "足够长的内容。".repeat(30) }] }));
     return new Response(
       JSON.stringify({ choices: [{ message: { content: "我觉得这个视频很棒" } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }),
     );
@@ -333,7 +347,7 @@ test("B站限流会先退避重试，不会直接掉进语音识别", async () =
   let playerCalls = 0;
   const slept: number[] = [];
   const fake = async (url: string) => {
-    if (url.includes("x/web-interface/view")) return new Response(metaResponse("BVLIMIT00001"));
+    if (url.includes("x/web-interface/view")) return new Response(metaWithTitle("BVLIMIT00001", "足够长的内容讲解"));
     if (url.includes("x/player/v2")) {
       playerCalls++;
       if (playerCalls === 1) return new Response(JSON.stringify({ code: -352 }));
@@ -345,12 +359,13 @@ test("B站限流会先退避重试，不会直接掉进语音识别", async () =
       );
     }
     if (url.includes("//aisubtitle.hdslb.com/x.json"))
-      return new Response(JSON.stringify({ body: [{ from: 0, to: 5, content: "足够长的内容。".repeat(30) }] }));
+      return new Response(JSON.stringify({ body: [{ from: 0, to: 60, content: "足够长的内容。".repeat(30) }, { from: 60, to: 120, content: "足够长的内容。".repeat(30) }, { from: 120, to: 180, content: "足够长的内容。".repeat(30) }] }));
     return new Response(llmResponse());
   };
   let asrCalled = 0;
   const deps = depsWith({
     fetchImpl: fake,
+    subtitleAttempts: 3,
     sleep: async (ms: number) => {
       slept.push(ms);
     },
@@ -364,7 +379,7 @@ test("B站限流会先退避重试，不会直接掉进语音识别", async () =
   await q.onIdle();
   assert.equal(q.get(jobId)!.status, "done");
   assert.equal(slept.length, 1);
-  assert.equal(playerCalls, 2);
+  assert.equal(playerCalls, 3);
   assert.equal(asrCalled, 0);
   const video = deps.db.prepare("select source from videos").get() as { source: string };
   assert.equal(video.source, "subtitle");
@@ -501,4 +516,100 @@ test("字幕不可信但装着语音识别时，改走识别并在报告里说�
       .payload_json,
   ) as { caveats: string[] };
   assert.match(payload.caveats[0], /对不上/);
+});
+
+test("强制重新生成会重抓字幕，不会沿用旧文字稿", async () => {
+  let playerCalls = 0;
+  let subtitleVersion = 1;
+  const fake = async (url: string) => {
+    if (url.includes("x/web-interface/view")) return new Response(metaWithTitle("BVFORCEREF01", "文字稿内容"));
+    if (url.includes("x/player/v2")) {
+      playerCalls++;
+      return new Response(
+        JSON.stringify({
+          code: 0,
+          data: { subtitle: { subtitles: [{ lan: "ai-zh", subtitle_url: "//aisubtitle.hdslb.com/x.json" }] } },
+        }),
+      );
+    }
+    if (url.includes("//aisubtitle.hdslb.com/x.json"))
+      return new Response(
+        JSON.stringify({
+          body: [
+            {
+              from: 0,
+              to: 60,
+              content: (subtitleVersion === 1 ? "第一版文字稿内容。" : "第二版文字稿内容。").repeat(20),
+            },
+            {
+              from: 60,
+              to: 120,
+              content: (subtitleVersion === 1 ? "第一版文字稿内容。" : "第二版文字稿内容。").repeat(20),
+            },
+            {
+              from: 120,
+              to: 180,
+              content: (subtitleVersion === 1 ? "第一版文字稿内容。" : "第二版文字稿内容。").repeat(20),
+            },
+          ],
+        }),
+      );
+    return new Response(llmResponse());
+  };
+  const deps = depsWith({ fetchImpl: fake, subtitleAttempts: 2 });
+  const q = createQueue(deps);
+  await q.submit("BVFORCEREF01");
+  await q.onIdle();
+  subtitleVersion = 2;
+  await q.submit("BVFORCEREF01", true);
+  await q.onIdle();
+
+  const row = deps.db.prepare("select transcript_text from videos").get() as { transcript_text: string };
+  assert.equal(playerCalls, 4, "两次运行各取两次字幕");
+  assert.match(row.transcript_text, /第二版/);
+});
+
+test("标题和文字稿毫无关系时在报告里提示可能抓错字幕", async () => {
+  const fake = async (url: string) => {
+    if (url.includes("x/web-interface/view"))
+      return new Response(
+        JSON.stringify({
+          code: 0,
+          data: {
+            bvid: "BVTITLEMISS1",
+            aid: 4,
+            title: "毕业两年后的收入差距：月薪五千对比年入百万",
+            owner: { name: "UP主" },
+            duration: 600,
+            pic: "",
+            pages: [{ cid: 41, page: 1, duration: 600 }],
+          },
+        }),
+      );
+    if (url.includes("x/player/v2"))
+      return new Response(
+        JSON.stringify({
+          code: 0,
+          data: { subtitle: { subtitles: [{ lan: "ai-zh", subtitle_url: "//aisubtitle.hdslb.com/x.json" }] } },
+        }),
+      );
+    if (url.includes("//aisubtitle.hdslb.com/x.json"))
+      return new Response(
+        JSON.stringify({
+          body: [{ from: 0, to: 60, content: "弟弟在学校里找同学关注我的账号，顺便逛了食堂和宿舍。".repeat(10) }, { from: 60, to: 120, content: "弟弟在学校里找同学关注我的账号，顺便逛了食堂和宿舍。".repeat(10) }, { from: 120, to: 180, content: "弟弟在学校里找同学关注我的账号，顺便逛了食堂和宿舍。".repeat(10) }],
+        }),
+      );
+    return new Response(llmResponse());
+  };
+  const deps = depsWith({ fetchImpl: fake });
+  const q = createQueue(deps);
+  const jobId = await q.submit("BVTITLEMISS1");
+  await q.onIdle();
+  const job = q.get(jobId)!;
+  assert.equal(job.status, "done");
+  const payload = JSON.parse(
+    (deps.db.prepare("select payload_json from reports where id = ?").get(job.reportId) as { payload_json: string })
+      .payload_json,
+  ) as { caveats: string[] };
+  assert.ok(payload.caveats.some((c) => /标题/.test(c)), "应提示标题与内容对不上");
 });

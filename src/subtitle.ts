@@ -29,6 +29,42 @@ export function subtitleFitsVideo(cues: Cue[], duration: number): boolean {
   return maxTo <= Math.max(duration + 30, duration * 1.2);
 }
 
+export function titleLooksUnrelated(title: string, text: string): boolean {
+  return titleScore(title, text) === 0 && titleGrams(title).size >= 5;
+}
+
+function titleGrams(title: string): Set<string> {
+  const cleanTitle = title.replace(/[^\u4e00-\u9fa5A-Za-z0-9]/g, "");
+  const grams = new Set<string>();
+  for (let i = 0; i + 1 < cleanTitle.length; i++) {
+    grams.add(cleanTitle.slice(i, i + 2));
+  }
+  return grams;
+}
+
+export function titleScore(title: string, text: string): number {
+  const grams = titleGrams(title);
+  if (grams.size === 0) return 0;
+  const body = text.replace(/\s/g, "");
+  let hits = 0;
+  for (const gram of grams) {
+    if (body.includes(gram)) hits++;
+  }
+  return hits;
+}
+
+export function subtitleUsable(cues: Cue[], duration: number): boolean {
+  if (!subtitleFitsVideo(cues, duration)) return false;
+  const chars = cues.reduce((n, cue) => n + cue.text.length, 0);
+  if (duration >= 60 && (cues.length < 3 || chars < 80)) return false;
+  if (duration > 0 && chars < 20) return false;
+  if (duration >= 120) {
+    const maxTo = cues.reduce((max, cue) => Math.max(max, cue.to), 0);
+    if (maxTo < duration * 0.25) return false;
+  }
+  return true;
+}
+
 export function cuesToParagraphs(cues: Cue[]): Paragraph[] {
   const flat = cues
     .filter((c) => c.text.trim() !== "")

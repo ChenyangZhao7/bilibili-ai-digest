@@ -14,9 +14,13 @@ import {
   type JobStage,
 } from "./db.ts";
 import { getLlmConfig, hasLlmKey } from "./settings.ts";
-import { fetchSubtitle, fetchVideoMeta, parseVideoInput, resolveShortLink, type SubtitleResult } from "./bilibili.ts";
+import { fetchBestSubtitle, fetchVideoMeta, parseVideoInput, resolveShortLink } from "./bilibili.ts";
 import { cookieHeader, getCookie } from "./auth.ts";
-import { cuesToParagraphs, paragraphsToTimestampedText, subtitleFitsVideo } from "./subtitle.ts";
+import {
+  cuesToParagraphs,
+  paragraphsToTimestampedText,
+  titleLooksUnrelated,
+} from "./subtitle.ts";
 import { summarize, renderMarkdown, PROMPT_VERSION } from "./llm.ts";
 import {
   downloadFile,
@@ -41,8 +45,6 @@ export function stageProgress(stage: JobStage): number {
   };
   return map[stage];
 }
-
-const RISK_CONTROL_BACKOFF = [300, 900, 2700];
 
 function readTranscript(raw: string): Paragraph[] {
   if (!raw || raw === "[]") return [];
@@ -128,38 +130,37 @@ export async function runPipeline(
       updateJob(db, jobId, { bvid: meta.bvid, cid: meta.cid, updatedAt: deps.now() });
 
       const existing = getVideo(db, meta.bvid, meta.cid);
-      paragraphs = existing ? readTranscript(existing.transcriptJson) : [];
+      paragraphs = existing && !opts.force ? readTranscript(existing.transcriptJson) : [];
 
       if (paragraphs.length === 0) {
         touch("subtitle");
         const cookie = getCookie(db);
-        const fetchOnce = async (): Promise<SubtitleResult> =>
-          cookie
-            ? fetchSubtitle(meta.bvid, meta.cid, cookieHeader(cookie), deps.fetchImpl)
-            : { ok: false, reason: "not_logged_in", detail: "还没登录" };
-
-        let sub = await fetchOnce();
-        if (!sub.ok && sub.reason === "risk_control") {
-          for (const wait of RISK_CONTROL_BACKOFF) {
-            await sleep(wait);
-            sub = await fetchOnce();
-            if (sub.ok) break;
-            if (sub.reason !== "risk_control") break;
-          }
-        }
+        const pick = await fetchBestSubtitle({
+          bvid: meta.bvid,
+          cid: meta.cid,
+          cookie: cookie ? cookieHeader(cookie) : null,
+          duration: meta.duration,
+          title: meta.title,
+          fetchImpl: deps.fetchImpl,
+          sleep,
+          attempts: deps.subtitleAttempts,
+        });
 
         let cues: Cue[];
         let source: "subtitle" | "asr";
-        const subtitleUsable = sub.ok && subtitleFitsVideo(sub.cues, meta.duration);
 
-        if (sub.ok && subtitleUsable) {
-          cues = sub.cues;
+        if (pick.ok) {
+          cues = pick.cues;
           source = "subtitle";
+          if (pick.titleScore === 0) {
+            subtitleFallbackNote =
+              "B站返回的字幕和视频标题对不上（可能抓错了字幕，也可能标题党），这份报告基于其中一份候选字幕，建议核对。";
+          }
         } else {
-          const reason = sub.ok ? "mismatch" : sub.reason;
+          const reason = pick.reason;
           subtitleFallbackNote =
-            reason === "mismatch"
-              ? "B站给这个视频挂的字幕和视频时长对不上（疑似复用了别的视频的字幕），下面的文字来自本机语音识别，可能有错。"
+            reason === "unreliable"
+              ? "B站返回的字幕和视频对不上（拿到了别的视频的字幕或广告），下面的文字来自本机语音识别，可能有错。"
               : reason === "not_logged_in"
                 ? "字幕没拿到（登录过期或未登录），下面的文字来自本机语音识别，可能有错。"
                 : reason === "risk_control"
@@ -169,8 +170,8 @@ export async function runPipeline(
           const ready = deps.asrReady ?? (await ensureAsr()).ready;
           if (!ready) {
             throw new Error(
-              reason === "mismatch"
-                ? "这个视频的字幕和时长对不上（B站挂错了字幕），不敢拿来总结；本机语音识别组件也没装，装好后可以重试"
+              reason === "unreliable"
+                ? "B站返回的字幕和视频对不上（拿到了别的视频的字幕或广告），不敢拿来总结；本机语音识别组件也没装，装好后可以重试"
                 : reason === "not_logged_in"
                   ? "登录过期或没登录，去设置里扫码；本机语音识别组件也没装，装好后没字幕的视频也能处理"
                   : "缺少语音识别组件（约 1.5GB），去设置里一键安装，装好后点重试",
@@ -220,6 +221,9 @@ export async function runPipeline(
       throw new Error("还没填 LLM key，文字稿已经保存好了，填好后点重试即可，不用重新抓");
     }
 
+    const titleUnrelated =
+      paragraphs.length > 0 && titleLooksUnrelated(title, paragraphsToTimestampedText(paragraphs));
+
     touch("summarizing");
     const result = await summarize({
       cfg: getLlmConfig(db),
@@ -230,6 +234,12 @@ export async function runPipeline(
 
     if (subtitleFallbackNote) {
       result.payload.caveats = [subtitleFallbackNote, ...result.payload.caveats];
+    }
+    if (titleUnrelated) {
+      result.payload.caveats = [
+        ...result.payload.caveats,
+        "标题和文字稿几乎对不上：可能抓错了字幕，也可能是标题党。建议点开原片核对一眼。",
+      ];
     }
 
     const markdown = renderMarkdown(result.payload, { title, owner, duration, bvid, page });

@@ -21,6 +21,7 @@ export type Deps = {
   prepareAudio?: (input: string, output: string) => Promise<void>;
   asrReady?: boolean;
   sleep?: (ms: number) => Promise<void>;
+  subtitleAttempts?: number;
   workDir: string;
 };
 
