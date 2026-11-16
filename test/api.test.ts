@@ -61,6 +61,7 @@ test("设置接口永不明文返回 key，测试连接的响应也不含 key", 
   server.close();
   assert.equal(JSON.stringify(s).includes("sk-super-secret-123456"), false);
   assert.equal(JSON.stringify(t).includes("sk-super-secret-123456"), false);
+  assert.equal(JSON.stringify(s).includes("bili_jct"), false);
   assert.equal(s.llmBaseUrl, "https://api.deepseek.com/v1");
 });
 

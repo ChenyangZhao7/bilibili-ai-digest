@@ -14,7 +14,8 @@ export type Settings = {
   llmBaseUrl: string;
   llmModel: string;
   llmApiKeyMasked: string;
-  biliCookie: BiliCookie | null;
+  biliLoggedIn: boolean;
+  biliUserId: string | null;
 };
 
 export type VideoSource = "subtitle" | "asr";
@@ -184,11 +185,13 @@ function parseCookie(raw: string | null): BiliCookie | null {
 }
 
 export function getSettings(db: DatabaseSync): Settings {
+  const cookie = parseCookie(getSetting(db, "bili_cookie"));
   return {
     llmBaseUrl: getSetting(db, "llm_base_url") ?? DEFAULT_LLM_BASE_URL,
     llmModel: getSetting(db, "llm_model") ?? DEFAULT_LLM_MODEL,
     llmApiKeyMasked: maskSecret(getSetting(db, "llm_api_key") ?? ""),
-    biliCookie: parseCookie(getSetting(db, "bili_cookie")),
+    biliLoggedIn: Boolean(cookie?.SESSDATA),
+    biliUserId: cookie?.DedeUserID || null,
   };
 }
 

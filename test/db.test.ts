@@ -62,11 +62,15 @@ test("视频按 bvid+cid 唯一，重复写入覆盖", () => {
   assert.equal(getVideo(db, "BV1xx411c7mD", 1)?.title, "t2");
 });
 
-test("cookie 存成 JSON，loadSettings 只返回结构化字段", () => {
+test("cookie 只存库，设置接口不外泄 SESSDATA", () => {
   const db = openDb(":memory:");
   initSchema(db);
   saveCookie(db, { SESSDATA: "s", bili_jct: "j", DedeUserID: "1", buvid3: "b" });
-  assert.equal(loadSettings(db).biliCookie?.DedeUserID, "1");
+  const s = loadSettings(db);
+  assert.equal(s.biliLoggedIn, true);
+  assert.equal(s.biliUserId, "1");
+  assert.equal(JSON.stringify(s).includes("bili_jct"), false);
+  assert.equal(JSON.stringify(s).includes("SESSDATA"), false);
 });
 
 test("报告可按标题/UP主/正文搜索，并带视频元数据", () => {
@@ -108,7 +112,7 @@ test("损坏的 cookie JSON 不让程序崩溃", () => {
   const db = openDb(":memory:");
   initSchema(db);
   setSetting(db, "bili_cookie", "{not json");
-  assert.equal(loadSettings(db).biliCookie, null);
+  assert.equal(loadSettings(db).biliLoggedIn, false);
   saveLlmSettings(db, { baseUrl: "https://x/v1", model: "m", apiKey: "k" });
   assert.equal(loadSettings(db).llmBaseUrl, "https://x/v1");
 });
