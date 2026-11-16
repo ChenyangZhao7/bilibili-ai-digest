@@ -4,8 +4,9 @@ $repo = 'ChenyangZhao7/video'
 $infoPath = Join-Path $PSScriptRoot 'repo-info.json'
 
 try {
+  $gcm = 'C:\Program Files\Git\mingw64\bin\git-credential-manager.exe'
   $query = @('protocol=https', 'host=github.com', '')
-  $credential = $query | git credential fill 2>$null
+  $credential = $query | & $gcm get 2>$null
 } catch {
   $credential = $null
 }
