@@ -85,6 +85,7 @@ node scripts/smoke.ts BV1CFsE6pEqp     # 对正在跑的服务做端到端冒烟
 
 ## 常见问题
 
+外部依赖导致的已知问题（B站 字幕接口乱发字幕、ASR 组件下载、多 P 行为等）单独记在 [`docs/known-issues.md`](docs/known-issues.md)。
 **抓不到字幕 / 提示登录过期**
 设置页重新扫码。没有字幕时会自动转语音识别，慢一些但不会中断。
 
