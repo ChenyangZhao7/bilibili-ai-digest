@@ -1,0 +1,13 @@
+{
+  "description": "粘贴一个 B站 链接，自动抓字幕（没有字幕则本机语音识别），用 AI 生成带时间戳的可读报告：讲了什么、值不值得看、哪几段值得点回去看。本地运行，数据不出本机。",
+  "topics": [
+    "bilibili",
+    "subtitle",
+    "whisper",
+    "llm",
+    "video-summary",
+    "local-first",
+    "nodejs",
+    "sqlite"
+  ]
+}

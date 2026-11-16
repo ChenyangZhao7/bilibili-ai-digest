@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "B站视频 → 文字报告",
+  "description": "粘贴 B站 链接，抓字幕或用本机语音识别，生成带时间戳的 AI 报告（本地运行）",
   "scripts": {
     "start": "node server.ts",
     "dev": "node --watch server.ts",

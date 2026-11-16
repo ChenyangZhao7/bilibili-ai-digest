@@ -28,4 +28,7 @@ if errorlevel 1 (
 
 echo.
 echo Done: https://github.com/ChenyangZhao7/video
+echo.
+echo Updating repo description and topics...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\set-repo-info.ps1"
 pause
