@@ -1,0 +1,16 @@
+{
+  "code": 0,
+  "message": "0",
+  "data": {
+    "bvid": "BV1GJ411x7h7",
+    "aid": 80433022,
+    "title": "测试视频标题",
+    "owner": { "mid": 1, "name": "测试UP" },
+    "duration": 213,
+    "pic": "https://i0.hdslb.com/bfs/archive/cover.jpg",
+    "pages": [
+      { "cid": 111, "page": 1, "part": "第一集" },
+      { "cid": 222, "page": 2, "part": "第二集" }
+    ]
+  }
+}
