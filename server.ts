@@ -40,6 +40,7 @@ function summaryView(r: ReportSummary) {
     id: r.id,
     bvid: r.bvid,
     cid: r.cid,
+    page: r.page,
     title: r.title,
     owner: r.owner,
     duration: r.duration,
@@ -156,7 +157,7 @@ export function createApp(opts: AppOpts = {}) {
       createdAt: report.createdAt,
       markdown: report.markdown,
       payload,
-      degraded: payload === null,
+      degraded: report.degraded,
       transcript: video?.transcriptText ?? "",
       meta: {
         title: video?.title ?? "",
@@ -165,6 +166,7 @@ export function createApp(opts: AppOpts = {}) {
         cover: video?.cover ?? "",
         source: video?.source ?? "subtitle",
         bvid: report.bvid,
+        page: report.page,
       },
     });
   });

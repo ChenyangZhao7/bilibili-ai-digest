@@ -3,9 +3,11 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import ffmpegPath from "ffmpeg-static";
+import ffmpegStatic from "ffmpeg-static";
 import type { Cue, FetchLike } from "./types.ts";
-import { BILI_HEADERS } from "./bilibili.ts";
+import { BILI_HEADERS, hostAllowed, MEDIA_HOST_SUFFIXES } from "./bilibili.ts";
+
+const ffmpegPath = (typeof ffmpegStatic === "string" ? ffmpegStatic : null) as string | null;
 
 export const ASR_TARGETS = {
   cudaCublas: "bin/whisper-cublas-12.4.0-bin-x64",
@@ -33,7 +35,11 @@ export async function fetchAudioUrl(bvid: string, cid: number, fetchImpl: FetchL
     .filter((a) => a.baseUrl || a.base_url)
     .sort((a, b) => (b.bandwidth ?? 0) - (a.bandwidth ?? 0))[0];
   if (!best) throw new Error("这个视频没有可用的音频流（可能是图文或无声视频）");
-  return (best.baseUrl ?? best.base_url) as string;
+  const url = (best.baseUrl ?? best.base_url) as string;
+  if (!hostAllowed(url, MEDIA_HOST_SUFFIXES)) {
+    throw new Error("音频地址不在 B站域名下，拒绝下载");
+  }
+  return url;
 }
 
 export async function downloadFile(
@@ -148,11 +154,32 @@ export async function transcribe(
   return parseWhisperJson(JSON.parse(raw));
 }
 
-export async function toWav(input: string, output: string): Promise<void> {
-  if (!ffmpegPath) throw new Error("ffmpeg 不可用，重新安装依赖试试");
+export async function transcribeAuto(
+  root: string,
+  wavPath: string,
+  run: (wavPath: string, opts: { binPath: string; modelPath: string }) => Promise<Cue[]> = transcribe,
+): Promise<Cue[]> {
+  const model = pickModel(root);
+  if (!model) throw new Error("语音识别组件不完整，去设置里重新安装");
+
+  const cuda = binName(root, ASR_TARGETS.cudaCublas);
+  const cpu = binName(root, ASR_TARGETS.cpu);
+
+  if (cuda) {
+    try {
+      return await run(wavPath, { binPath: cuda, modelPath: model });
+    } catch (err) {
+      if (!cpu) throw err;
+    }
+  }
+  if (!cpu) throw new Error("语音识别组件不完整，去设置里重新安装");
+  return run(wavPath, { binPath: cpu, modelPath: model });
+}
+
+export async function toWav(input: string, output: string): Promise<void> {  if (!ffmpegPath) throw new Error("ffmpeg 不可用，重新安装依赖试试");
   await new Promise<void>((resolve, reject) => {
     const child = spawn(
-      ffmpegPath as string,
+      ffmpegPath,
       ["-y", "-i", input, "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", output],
       { windowsHide: true },
     );

@@ -48,6 +48,7 @@ test("视频按 bvid+cid 唯一，重复写入覆盖", () => {
   const base = {
     bvid: "BV1xx411c7mD",
     cid: 1,
+    page: 1,
     title: "t1",
     owner: "u",
     duration: 10,
@@ -77,12 +78,12 @@ test("报告可按标题/UP主/正文搜索，并带视频元数据", () => {
   const db = openDb(":memory:");
   initSchema(db);
   upsertVideo(db, {
-    bvid: "BV1", cid: 1, title: "深度讲解", owner: "老王", duration: 60, cover: "",
+    bvid: "BV1", cid: 1, page: 1, title: "深度讲解", owner: "老王", duration: 60, cover: "",
     source: "subtitle", transcriptJson: "[]", transcriptText: "正文", fetchedAt: 1,
   });
   insertReport(db, {
-    id: "r1", bvid: "BV1", cid: 1, model: "m", promptVersion: "p",
-    payloadJson: "{}", markdown: "# 报告", tokensIn: 1, tokensOut: 1, createdAt: 1000,
+    id: "r1", bvid: "BV1", cid: 1, page: 1, model: "m", promptVersion: "p",
+    payloadJson: "{}", markdown: "# 报告", tokensIn: 1, tokensOut: 1, degraded: false, createdAt: 1000,
   });
   const byTitle = listReports(db, "深度", 10, 0);
   const byOwner = listReports(db, "老王", 10, 0);

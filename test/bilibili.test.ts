@@ -56,3 +56,19 @@ test("纯数字 id 走 aid 参数", async () => {
   await fetchVideoMeta("80433022", 1, fake as never);
   assert.match(seen[0], /aid=80433022/);
 });
+
+test("?p 超过分 P 数量时报错，不静默退回第 1P", async () => {
+  const fake = async () => new Response(JSON.stringify(viewFixture));
+  await assert.rejects(fetchVideoMeta("BV1GJ411x7h7", 9, fake as never), /只有 2 个分 P/);
+});
+
+test("分 P 时长按该 P 自己的时长算，不是整片时长", async () => {
+  const fixture = structuredClone(viewFixture) as typeof viewFixture & {
+    data: { pages: { cid: number; page: number; duration?: number }[] };
+  };
+  fixture.data.pages[1].duration = 42;
+  const fake = async () => new Response(JSON.stringify(fixture));
+  const meta = await fetchVideoMeta("BV1GJ411x7h7", 2, fake as never);
+  assert.equal(meta.duration, 42);
+  assert.equal(meta.page, 2);
+});

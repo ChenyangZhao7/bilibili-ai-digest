@@ -1,9 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createApp } from "../server.ts";
+import { openDb, initSchema } from "../src/db.ts";
 
 test("health 返回 ok 与版本号", async () => {
-  const app = createApp();
+  const db = openDb(":memory:");
+  initSchema(db);
+  const app = createApp({ db });
   const server = app.listen(0, "127.0.0.1");
   await new Promise((r) => server.once("listening", r));
   const port = (server.address() as { port: number }).port;

@@ -5,7 +5,7 @@ import { summarize, validatePayload, buildRequest, NoSpeechContentError, renderM
 const cfg = { baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat", apiKey: "k" };
 const meta = { title: "标题", owner: "UP", duration: 600 };
 const okPayload = {
-  verdict: { watch: "skim", one_line: "讲了A", reason: "因为B" },
+  verdict: { watch: "skim" as const, one_line: "讲了A", reason: "因为B" },
   tldr: ["x"],
   sections: [{ title: "s", start: 0, end: 120, points: ["p"] }],
   highlights: [{ t: 30, label: "l", why: "w" }],
@@ -118,4 +118,9 @@ test("markdown 渲染含结论、时间戳链接与关键名词", () => {
   assert.match(md, /BV1GJ411x7h7\?t=0/);
   assert.match(md, /T：N|T: N/);
   assert.match(md, /略看|skim/);
+});
+
+test("多 P 报告的 markdown 链接带 p 参数", () => {
+  const md = renderMarkdown(okPayload, { ...meta, bvid: "BV1GJ411x7h7", page: 2 });
+  assert.match(md, /BV1GJ411x7h7\?p=2&t=0/);
 });

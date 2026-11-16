@@ -370,6 +370,24 @@ function showError(message, actions) {
 
 // ---------------- 报告页 ----------------
 
+function normalizePayload(raw) {
+  const p = raw && typeof raw === "object" ? raw : {};
+  const verdict = p.verdict && typeof p.verdict === "object" ? p.verdict : {};
+  const arr = (v) => (Array.isArray(v) ? v : []);
+  return {
+    verdict: {
+      watch: ["skip", "skim", "watch"].includes(verdict.watch) ? verdict.watch : "skim",
+      one_line: typeof verdict.one_line === "string" ? verdict.one_line : "报告内容不完整",
+      reason: typeof verdict.reason === "string" ? verdict.reason : "",
+    },
+    tldr: arr(p.tldr).filter((x) => typeof x === "string"),
+    sections: arr(p.sections).filter((s) => s && typeof s.title === "string"),
+    highlights: arr(p.highlights).filter((h) => h && typeof h.label === "string"),
+    key_terms: arr(p.key_terms).filter((k) => k && typeof k.term === "string"),
+    caveats: arr(p.caveats).filter((x) => typeof x === "string"),
+  };
+}
+
 async function renderReport(id) {
   view.className = "";
   view.textContent = "加载中…";
@@ -381,16 +399,14 @@ async function renderReport(id) {
     return;
   }
 
-  const payload = data.payload || {
-    verdict: { watch: "skim", one_line: "报告内容不可用", reason: "" },
-    tldr: [],
-    sections: [],
-    highlights: [],
-    key_terms: [],
-    caveats: [],
-  };
+  const payload = normalizePayload(data.payload);
   const meta = data.meta || {};
-  const videoUrl = (sec) => `https://www.bilibili.com/video/${data.bvid}?t=${Math.floor(sec)}`;
+  const page = Number(meta.page) > 1 ? Number(meta.page) : 1;
+  const pageParam = page > 1 ? `?p=${page}` : "";
+  const videoUrl = (sec) =>
+    page > 1
+      ? `https://www.bilibili.com/video/${data.bvid}?p=${page}&t=${Math.floor(sec)}`
+      : `https://www.bilibili.com/video/${data.bvid}?t=${Math.floor(sec)}`;
 
   const children = [];
 
@@ -407,7 +423,7 @@ async function renderReport(id) {
         { class: "actions" },
         el("a", {
           class: "tag",
-          href: `https://www.bilibili.com/video/${data.bvid}`,
+          href: `https://www.bilibili.com/video/${data.bvid}${pageParam}`,
           target: "_blank",
           rel: "noreferrer",
           text: "打开 B站",
@@ -420,7 +436,7 @@ async function renderReport(id) {
             try {
               const { jobId } = await api("/api/analyze", {
                 method: "POST",
-                body: { url: `https://www.bilibili.com/video/${data.bvid}`, force: true },
+                body: { url: `https://www.bilibili.com/video/${data.bvid}${pageParam}`, force: true },
               });
               location.hash = "#/";
               startPolling(jobId);
@@ -493,7 +509,7 @@ async function renderReport(id) {
           el(
             "ul",
             { class: "points" },
-            ...section.points.map((p) => el("li", { text: p })),
+            ...(Array.isArray(section.points) ? section.points : []).map((p) => el("li", { text: String(p) })),
           ),
         ),
       );

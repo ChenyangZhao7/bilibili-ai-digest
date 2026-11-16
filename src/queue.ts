@@ -20,6 +20,7 @@ export type Deps = {
   asrRunner?: (wavPath: string) => Promise<Cue[]>;
   prepareAudio?: (input: string, output: string) => Promise<void>;
   asrReady?: boolean;
+  sleep?: (ms: number) => Promise<void>;
   workDir: string;
 };
 

@@ -23,6 +23,7 @@ export type VideoSource = "subtitle" | "asr";
 export type VideoRow = {
   bvid: string;
   cid: number;
+  page: number;
   title: string;
   owner: string;
   duration: number;
@@ -37,12 +38,14 @@ export type ReportRow = {
   id: string;
   bvid: string;
   cid: number;
+  page: number;
   model: string;
   promptVersion: string;
   payloadJson: string;
   markdown: string;
   tokensIn: number;
   tokensOut: number;
+  degraded: boolean;
   createdAt: number;
 };
 
@@ -99,6 +102,7 @@ export function initSchema(db: DatabaseSync): void {
     CREATE TABLE IF NOT EXISTS videos (
       bvid TEXT NOT NULL,
       cid INTEGER NOT NULL,
+      page INTEGER NOT NULL DEFAULT 1,
       title TEXT NOT NULL DEFAULT '',
       owner TEXT NOT NULL DEFAULT '',
       duration INTEGER NOT NULL DEFAULT 0,
@@ -113,16 +117,17 @@ export function initSchema(db: DatabaseSync): void {
       id TEXT PRIMARY KEY,
       bvid TEXT NOT NULL,
       cid INTEGER NOT NULL,
+      page INTEGER NOT NULL DEFAULT 1,
       model TEXT NOT NULL DEFAULT '',
       prompt_version TEXT NOT NULL DEFAULT '',
       payload_json TEXT NOT NULL DEFAULT '{}',
       markdown TEXT NOT NULL DEFAULT '',
       tokens_in INTEGER NOT NULL DEFAULT 0,
       tokens_out INTEGER NOT NULL DEFAULT 0,
+      degraded INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL DEFAULT 0
     );
-    CREATE INDEX IF NOT EXISTS idx_reports_video ON reports (bvid, cid, created_at);
-    CREATE TABLE IF NOT EXISTS jobs (
+    CREATE INDEX IF NOT EXISTS idx_reports_video ON reports (bvid, cid, created_at);    CREATE TABLE IF NOT EXISTS jobs (
       id TEXT PRIMARY KEY,
       url TEXT NOT NULL,
       bvid TEXT,
@@ -140,6 +145,17 @@ export function initSchema(db: DatabaseSync): void {
       value TEXT NOT NULL DEFAULT ''
     );
   `);
+
+  ensureColumn(db, "videos", "page", "INTEGER NOT NULL DEFAULT 1");
+  ensureColumn(db, "reports", "page", "INTEGER NOT NULL DEFAULT 1");
+  ensureColumn(db, "reports", "degraded", "INTEGER NOT NULL DEFAULT 0");
+}
+
+function ensureColumn(db: DatabaseSync, table: string, column: string, ddl: string): void {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!cols.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
+  }
 }
 
 export function getSetting(db: DatabaseSync, key: SettingsKey): string | null {
@@ -197,15 +213,17 @@ export function getSettings(db: DatabaseSync): Settings {
 
 export function upsertVideo(db: DatabaseSync, v: VideoRow): void {
   db.prepare(
-    `INSERT INTO videos (bvid, cid, title, owner, duration, cover, source, transcript_json, transcript_text, fetched_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO videos (bvid, cid, page, title, owner, duration, cover, source, transcript_json, transcript_text, fetched_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(bvid, cid) DO UPDATE SET
-       title = excluded.title, owner = excluded.owner, duration = excluded.duration,
-       cover = excluded.cover, source = excluded.source, transcript_json = excluded.transcript_json,
-       transcript_text = excluded.transcript_text, fetched_at = excluded.fetched_at`,
+       page = excluded.page, title = excluded.title, owner = excluded.owner,
+       duration = excluded.duration, cover = excluded.cover, source = excluded.source,
+       transcript_json = excluded.transcript_json, transcript_text = excluded.transcript_text,
+       fetched_at = excluded.fetched_at`,
   ).run(
     v.bvid,
     v.cid,
+    v.page,
     v.title,
     v.owner,
     v.duration,
@@ -220,6 +238,7 @@ export function upsertVideo(db: DatabaseSync, v: VideoRow): void {
 type VideoDbRow = {
   bvid: string;
   cid: number;
+  page: number;
   title: string;
   owner: string;
   duration: number;
@@ -234,6 +253,7 @@ function toVideo(row: VideoDbRow): VideoRow {
   return {
     bvid: row.bvid,
     cid: Number(row.cid),
+    page: Number(row.page ?? 1),
     title: row.title,
     owner: row.owner,
     duration: Number(row.duration),
@@ -252,20 +272,29 @@ export function getVideo(db: DatabaseSync, bvid: string, cid: number): VideoRow 
   return row ? toVideo(row) : null;
 }
 
+export function findVideoByBvidPage(db: DatabaseSync, bvid: string, page: number): VideoRow | null {
+  const row = db
+    .prepare("SELECT * FROM videos WHERE bvid = ? AND page = ? ORDER BY fetched_at DESC LIMIT 1")
+    .get(bvid, page) as VideoDbRow | undefined;
+  return row ? toVideo(row) : null;
+}
+
 export function insertReport(db: DatabaseSync, r: ReportRow): void {
   db.prepare(
-    `INSERT INTO reports (id, bvid, cid, model, prompt_version, payload_json, markdown, tokens_in, tokens_out, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO reports (id, bvid, cid, page, model, prompt_version, payload_json, markdown, tokens_in, tokens_out, degraded, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     r.id,
     r.bvid,
     r.cid,
+    r.page,
     r.model,
     r.promptVersion,
     r.payloadJson,
     r.markdown,
     r.tokensIn,
     r.tokensOut,
+    r.degraded ? 1 : 0,
     r.createdAt,
   );
 }
@@ -274,12 +303,14 @@ type ReportDbRow = {
   id: string;
   bvid: string;
   cid: number;
+  page: number;
   model: string;
   prompt_version: string;
   payload_json: string;
   markdown: string;
   tokens_in: number;
   tokens_out: number;
+  degraded: number;
   created_at: number;
 };
 
@@ -288,12 +319,14 @@ function toReport(row: ReportDbRow): ReportRow {
     id: row.id,
     bvid: row.bvid,
     cid: Number(row.cid),
+    page: Number(row.page ?? 1),
     model: row.model,
     promptVersion: row.prompt_version,
     payloadJson: row.payload_json,
     markdown: row.markdown,
     tokensIn: Number(row.tokens_in),
     tokensOut: Number(row.tokens_out),
+    degraded: Number(row.degraded ?? 0) === 1,
     createdAt: Number(row.created_at),
   };
 }

@@ -1,25 +1,31 @@
 import path from "node:path";
 import fs from "node:fs";
 import { randomUUID } from "node:crypto";
-import type { DatabaseSync } from "node:sqlite";
 import type { Cue, Paragraph } from "./types.ts";
 import {
+  findRecentReport,
+  findVideoByBvidPage,
   getJob,
-  getSetting,
   getVideo,
   insertReport,
   redactSecrets,
   updateJob,
   upsertVideo,
-  findRecentReport,
   type JobStage,
 } from "./db.ts";
 import { getLlmConfig, hasLlmKey } from "./settings.ts";
-import { fetchSubtitle, fetchVideoMeta, parseVideoInput, resolveShortLink } from "./bilibili.ts";
+import { fetchSubtitle, fetchVideoMeta, parseVideoInput, resolveShortLink, type SubtitleResult } from "./bilibili.ts";
 import { cookieHeader, getCookie } from "./auth.ts";
 import { cuesToParagraphs, paragraphsToTimestampedText } from "./subtitle.ts";
 import { summarize, renderMarkdown, PROMPT_VERSION } from "./llm.ts";
-import { downloadFile, ensureAsr, fetchAudioUrl, pickModel, pickWhisperBinary, toWav, transcribe } from "./asr.ts";
+import {
+  downloadFile,
+  ensureAsr,
+  fetchAudioUrl,
+  toWav,
+  transcribe,
+  transcribeAuto,
+} from "./asr.ts";
 import type { Deps } from "./queue.ts";
 
 export function stageProgress(stage: JobStage): number {
@@ -35,6 +41,8 @@ export function stageProgress(stage: JobStage): number {
   };
   return map[stage];
 }
+
+const RISK_CONTROL_BACKOFF = [300, 900, 2700];
 
 function readTranscript(raw: string): Paragraph[] {
   if (!raw || raw === "[]") return [];
@@ -60,6 +68,7 @@ export async function runPipeline(
   opts: { force?: boolean } = {},
 ): Promise<void> {
   const db = deps.db;
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const touch = (stage: JobStage, patch: Parameters<typeof updateJob>[2] = {}) =>
     updateJob(db, jobId, {
       stage,
@@ -67,6 +76,8 @@ export async function runPipeline(
       updatedAt: deps.now(),
       ...patch,
     });
+
+  const tempFiles: string[] = [];
 
   try {
     touch("parsing", { status: "running", error: null });
@@ -78,6 +89,8 @@ export async function runPipeline(
     let owner = cached?.owner ?? "";
     let duration = cached?.duration ?? 0;
     let bvid = cached?.bvid ?? "";
+    let page = cached?.page ?? 1;
+    let subtitleFallbackNote: string | null = null;
 
     if (paragraphs.length === 0) {
       let input = parseVideoInput(rawUrl);
@@ -91,23 +104,24 @@ export async function runPipeline(
       }
       const inputId = input.id;
       bvid = input.kind === "bvid" ? inputId : "";
+      page = input.p;
 
+      // 复用只看「同一个 bvid 的同一个分 P」，不能拿 P1 的报告冒充 P2
       if (bvid && !opts.force) {
-        const cachedRow = db
-          .prepare("SELECT cid FROM videos WHERE bvid = ? ORDER BY fetched_at DESC LIMIT 1")
-          .get(bvid) as { cid: number } | undefined;
+        const cachedRow = findVideoByBvidPage(db, bvid, page);
         if (cachedRow) {
-          const recent = findRecentReport(db, bvid, Number(cachedRow.cid), 24, deps.now());
+          const recent = findRecentReport(db, bvid, cachedRow.cid, 24, deps.now());
           if (recent) {
-            touch("done", { status: "done", reportId: recent.id, bvid, cid: Number(cachedRow.cid) });
+            touch("done", { status: "done", reportId: recent.id, bvid, cid: cachedRow.cid });
             return;
           }
         }
       }
 
       touch("fetching_meta");
-      const meta = await fetchVideoMeta(inputId, input.p, deps.fetchImpl);
+      const meta = await fetchVideoMeta(inputId, page, deps.fetchImpl);
       bvid = meta.bvid;
+      page = meta.page;
       title = meta.title;
       owner = meta.owner;
       duration = meta.duration;
@@ -119,9 +133,20 @@ export async function runPipeline(
       if (paragraphs.length === 0) {
         touch("subtitle");
         const cookie = getCookie(db);
-        const sub = cookie
-          ? await fetchSubtitle(meta.bvid, meta.cid, cookieHeader(cookie), deps.fetchImpl)
-          : ({ ok: false as const, reason: "not_logged_in" as const, detail: "还没登录" });
+        const fetchOnce = async (): Promise<SubtitleResult> =>
+          cookie
+            ? fetchSubtitle(meta.bvid, meta.cid, cookieHeader(cookie), deps.fetchImpl)
+            : { ok: false, reason: "not_logged_in", detail: "还没登录" };
+
+        let sub = await fetchOnce();
+        if (!sub.ok && sub.reason === "risk_control") {
+          for (const wait of RISK_CONTROL_BACKOFF) {
+            await sleep(wait);
+            sub = await fetchOnce();
+            if (sub.ok) break;
+            if (sub.reason !== "risk_control") break;
+          }
+        }
 
         let cues: Cue[];
         let source: "subtitle" | "asr";
@@ -130,9 +155,20 @@ export async function runPipeline(
           cues = sub.cues;
           source = "subtitle";
         } else {
+          subtitleFallbackNote =
+            sub.reason === "not_logged_in"
+              ? "字幕没拿到（登录过期或未登录），下面的文字来自本机语音识别，可能有错。"
+              : sub.reason === "risk_control"
+                ? "B站限流，字幕暂时拿不到，下面的文字来自本机语音识别，可能有错。"
+                : "这个视频没有字幕，下面的文字来自本机语音识别，可能有错。";
+
           const ready = deps.asrReady ?? (await ensureAsr()).ready;
           if (!ready) {
-            throw new Error("缺少语音识别组件（约 1.5GB），去设置里一键安装，装好后点重试");
+            throw new Error(
+              sub.reason === "not_logged_in"
+                ? "登录过期或没登录，去设置里扫码；本机语音识别组件也没装，装好后没字幕的视频也能处理"
+                : "缺少语音识别组件（约 1.5GB），去设置里一键安装，装好后点重试",
+            );
           }
 
           touch("downloading");
@@ -140,6 +176,8 @@ export async function runPipeline(
           fs.mkdirSync(deps.workDir, { recursive: true });
           const audioPath = path.join(deps.workDir, `${meta.bvid}-${meta.cid}.m4a`);
           const wavPath = path.join(deps.workDir, `${meta.bvid}-${meta.cid}.wav`);
+          tempFiles.push(audioPath, wavPath);
+
           await downloadFile(audioUrl, audioPath, deps.fetchImpl);
           if (deps.prepareAudio) await deps.prepareAudio(audioPath, wavPath);
           else await toWav(audioPath, wavPath);
@@ -148,11 +186,7 @@ export async function runPipeline(
           if (deps.asrRunner) {
             cues = await deps.asrRunner(wavPath);
           } else {
-            const root = process.cwd();
-            const binPath = pickWhisperBinary(root);
-            const modelPath = pickModel(root);
-            if (!binPath || !modelPath) throw new Error("语音识别组件不完整，去设置里重新安装");
-            cues = await transcribe(wavPath, { binPath, modelPath });
+            cues = await transcribeAuto(process.cwd(), wavPath, transcribe);
           }
           source = "asr";
         }
@@ -163,6 +197,7 @@ export async function runPipeline(
         upsertVideo(db, {
           bvid: meta.bvid,
           cid: meta.cid,
+          page: meta.page,
           title: meta.title,
           owner: meta.owner,
           duration: meta.duration,
@@ -187,18 +222,24 @@ export async function runPipeline(
       fetchImpl: deps.fetchImpl,
     });
 
-    const markdown = renderMarkdown(result.payload, { title, owner, duration, bvid });
+    if (subtitleFallbackNote) {
+      result.payload.caveats = [subtitleFallbackNote, ...result.payload.caveats];
+    }
+
+    const markdown = renderMarkdown(result.payload, { title, owner, duration, bvid, page });
     const reportId = randomUUID();
     insertReport(db, {
       id: reportId,
       bvid,
       cid: Number(getJob(db, jobId)?.cid ?? 0),
+      page,
       model: getLlmConfig(db).model,
       promptVersion: PROMPT_VERSION,
       payloadJson: JSON.stringify(result.payload),
       markdown,
       tokensIn: result.tokensIn,
       tokensOut: result.tokensOut,
+      degraded: result.degraded,
       createdAt: deps.now(),
     });
 
@@ -213,5 +254,9 @@ export async function runPipeline(
       updatedAt: deps.now(),
     });
     throw err;
+  } finally {
+    for (const file of tempFiles) {
+      fs.rmSync(file, { force: true });
+    }
   }
 }

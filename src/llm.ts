@@ -302,9 +302,13 @@ const WATCH_LABEL: Record<ReportPayload["verdict"]["watch"], string> = {
 
 export function renderMarkdown(
   payload: ReportPayload,
-  meta: { title: string; owner: string; duration: number; bvid: string },
+  meta: { title: string; owner: string; duration: number; bvid: string; page?: number },
 ): string {
-  const videoUrl = (sec: number) => `https://www.bilibili.com/video/${meta.bvid}?t=${Math.floor(sec)}`;
+  const page = meta.page && meta.page > 1 ? meta.page : 1;
+  const videoUrl = (sec: number) =>
+    page > 1
+      ? `https://www.bilibili.com/video/${meta.bvid}?p=${page}&t=${Math.floor(sec)}`
+      : `https://www.bilibili.com/video/${meta.bvid}?t=${Math.floor(sec)}`;
   const lines: string[] = [];
 
   lines.push(`# ${meta.title}`);

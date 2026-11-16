@@ -27,16 +27,17 @@ export const ASR_DOWNLOADS = [
     extractTo: ASR_TARGETS.cudaCublas,
   },
   {
+    kind: "zip" as const,
+    name: "Whisper 程序（CPU 保底版）",
+    url: "https://github.com/ggml-org/whisper.cpp/releases/download/b5454/whisper-bin-x64.zip",
+    file: "downloads/whisper-bin-x64.zip",
+    extractTo: ASR_TARGETS.cpu,
+  },
+  {
     kind: "model" as const,
     name: "语音模型 medium（约 1.5GB）",
     url: "https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin",
     file: ASR_TARGETS.modelMedium,
-  },
-  {
-    kind: "model" as const,
-    name: "语音模型 small（约 470MB，保底）",
-    url: "https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/ggml-small.bin",
-    file: ASR_TARGETS.modelSmall,
   },
 ];
 
@@ -44,8 +45,35 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-async function extractZip(zipPath: string, targetDir: string): Promise<void> {
-  fs.mkdirSync(targetDir, { recursive: true });
+export function flattenBinaryDir(targetDir: string): void {
+  const findExe = (dir: string): string | null => {
+    if (!fs.existsSync(dir)) return null;
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    const direct = entries.find(
+      (e) => e.isFile() && (e.name === "whisper-cli.exe" || e.name === "main.exe"),
+    );
+    if (direct) return dir;
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const found = findExe(path.join(dir, entry.name));
+      if (found) return found;
+    }
+    return null;
+  };
+
+  const exeDir = findExe(targetDir);
+  if (!exeDir || path.resolve(exeDir) === path.resolve(targetDir)) return;
+
+  for (const entry of fs.readdirSync(exeDir, { withFileTypes: true })) {
+    const from = path.join(exeDir, entry.name);
+    const to = path.join(targetDir, entry.name);
+    if (fs.existsSync(to)) continue;
+    fs.renameSync(from, to);
+  }
+  fs.rmSync(exeDir, { recursive: true, force: true });
+}
+
+async function extractZip(zipPath: string, targetDir: string): Promise<void> {  fs.mkdirSync(targetDir, { recursive: true });
   await new Promise<void>((resolve, reject) => {
     const child = spawn(
       "powershell",
@@ -70,6 +98,7 @@ export async function installAsr(opts: {
   retries?: number;
   onProgress?: (p: { stage: string; done: number; total: number }) => void;
 }): Promise<void> {
+  if (state.running) throw new Error("已经在安装了，别重复点");
   const root = opts.root ?? process.cwd();
   const retries = opts.retries ?? 3;
   const report = opts.onProgress ?? (() => {});
@@ -118,6 +147,8 @@ export async function installAsr(opts: {
         state.stage = "解压程序";
         report({ stage: state.stage, done: 0, total: 0 });
         await extractZip(filePath, path.join(root, item.extractTo));
+        flattenBinaryDir(path.join(root, item.extractTo));
+        fs.rmSync(filePath, { force: true });
       }
     }
 

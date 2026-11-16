@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import { openDb, initSchema } from "../src/db.ts";
 import { saveCookie, saveLlmSettings } from "../src/settings.ts";
 import { createQueue, estimateCost } from "../src/queue.ts";
@@ -32,7 +34,24 @@ const metaResponse = (bvid = "BV1GJ411x7h7") =>
       owner: { name: "UP主" },
       duration: 600,
       pic: "",
-      pages: [{ cid: 1, page: 1 }],
+      pages: [{ cid: 1, page: 1, duration: 300 }],
+    },
+  });
+
+const multiMetaResponse = (bvid = "BVMULTI00001") =>
+  JSON.stringify({
+    code: 0,
+    data: {
+      bvid,
+      aid: 2,
+      title: "多P视频",
+      owner: { name: "UP主" },
+      duration: 900,
+      pic: "",
+      pages: [
+        { cid: 11, page: 1, duration: 600 },
+        { cid: 22, page: 2, duration: 300 },
+      ],
     },
   });
 
@@ -63,10 +82,10 @@ test("有字幕时走快路，产出报告并跳过 ASR", async () => {
       return new Response(
         JSON.stringify({
           code: 0,
-          data: { subtitle: { subtitles: [{ lan: "ai-zh", subtitle_url: "//s/x.json" }] } },
+          data: { subtitle: { subtitles: [{ lan: "ai-zh", subtitle_url: "//aisubtitle.hdslb.com/x.json" }] } },
         }),
       );
-    if (url.includes("//s/x.json"))
+    if (url.includes("//aisubtitle.hdslb.com/x.json"))
       return new Response(JSON.stringify({ body: [{ from: 0, to: 5, content: "第一句话。".repeat(30) }] }));
     return new Response(llmResponse());
   };
@@ -94,9 +113,9 @@ test("字幕失败时降级到 ASR，报告标记来源", async () => {
     if (url.includes("x/player/v2")) return new Response(JSON.stringify({ code: -101, message: "未登录" }));
     if (url.includes("playurl"))
       return new Response(
-        JSON.stringify({ code: 0, data: { dash: { audio: [{ baseUrl: "https://a/1.m4s", bandwidth: 1 }] } } }),
+        JSON.stringify({ code: 0, data: { dash: { audio: [{ baseUrl: "https://a.bilivideo.com/1.m4s", bandwidth: 1 }] } } }),
       );
-    if (url.startsWith("https://a/")) return new Response(new Uint8Array([1, 2, 3]));
+    if (url.startsWith("https://a.bilivideo.com/")) return new Response(new Uint8Array([1, 2, 3]));
     return new Response(llmResponse());
   };
   const deps = depsWith({
@@ -125,10 +144,10 @@ test("失败任务保留断点，retry 从文字稿直接重新总结（不重�
       return new Response(
         JSON.stringify({
           code: 0,
-          data: { subtitle: { subtitles: [{ lan: "ai-zh", subtitle_url: "//s/x.json" }] } },
+          data: { subtitle: { subtitles: [{ lan: "ai-zh", subtitle_url: "//aisubtitle.hdslb.com/x.json" }] } },
         }),
       );
-    if (url.includes("//s/x.json"))
+    if (url.includes("//aisubtitle.hdslb.com/x.json"))
       return new Response(JSON.stringify({ body: [{ from: 0, to: 5, content: "足够长的内容。".repeat(30) }] }));
     llmCalls++;
     if (llmCalls === 1) return new Response(JSON.stringify({ error: { message: "no key" } }), { status: 401 });
@@ -159,10 +178,10 @@ test("24 小时内同视频复用已有报告，不重复抓取", async () => {
       return new Response(
         JSON.stringify({
           code: 0,
-          data: { subtitle: { subtitles: [{ lan: "ai-zh", subtitle_url: "//s/x.json" }] } },
+          data: { subtitle: { subtitles: [{ lan: "ai-zh", subtitle_url: "//aisubtitle.hdslb.com/x.json" }] } },
         }),
       );
-    if (url.includes("//s/x.json"))
+    if (url.includes("//aisubtitle.hdslb.com/x.json"))
       return new Response(JSON.stringify({ body: [{ from: 0, to: 5, content: "足够长的内容。".repeat(30) }] }));
     return new Response(llmResponse());
   };
@@ -189,13 +208,14 @@ test("非法链接的任务直接失败并给出中文原因", async () => {
   assert.match(job.error ?? "", /认不出这个链接/);
 });
 
-test("缺少 ASR 组件时失败文案指向设置页", async () => {  const fake = async (url: string) => {
+test("缺少 ASR 组件时失败文案指向设置页", async () => {
+  const fake = async (url: string) => {
     if (url.includes("x/web-interface/view")) return new Response(metaResponse("BVNOASR00001"));
     if (url.includes("x/player/v2")) return new Response(JSON.stringify({ code: 0, data: { subtitle: { subtitles: [] } } }));
     return new Response("{}");
   };
   const deps = depsWith({ fetchImpl: fake, asrReady: false });
-  const q = createQueue(deps, );
+  const q = createQueue(deps);
   const jobId = await q.submit("BVNOASR00001");
   await q.onIdle();
   const job = q.get(jobId)!;
@@ -215,10 +235,10 @@ test("force 提交跳过复用，重新生成新报告", async () => {
       return new Response(
         JSON.stringify({
           code: 0,
-          data: { subtitle: { subtitles: [{ lan: "ai-zh", subtitle_url: "//s/x.json" }] } },
+          data: { subtitle: { subtitles: [{ lan: "ai-zh", subtitle_url: "//aisubtitle.hdslb.com/x.json" }] } },
         }),
       );
-    if (url.includes("//s/x.json"))
+    if (url.includes("//aisubtitle.hdslb.com/x.json"))
       return new Response(JSON.stringify({ body: [{ from: 0, to: 5, content: "足够长的内容。".repeat(30) }] }));
     llmCalls++;
     return new Response(llmResponse());
@@ -232,4 +252,163 @@ test("force 提交跳过复用，重新生成新报告", async () => {
   assert.equal(llmCalls, 2, "强制重新生成应再调用一次 LLM");
   assert.notEqual(q.get(second)!.reportId, q.get(first)!.reportId);
   assert.equal(viewCalls, 2);
+});
+
+test("缓存了 P1 也不能拿来冒充 P2", async () => {
+  let viewCalls = 0;
+  const fake = async (url: string) => {
+    if (url.includes("x/web-interface/view")) {
+      viewCalls++;
+      return new Response(multiMetaResponse());
+    }
+    if (url.includes("x/player/v2"))
+      return new Response(
+        JSON.stringify({
+          code: 0,
+          data: { subtitle: { subtitles: [{ lan: "ai-zh", subtitle_url: "//aisubtitle.hdslb.com/x.json" }] } },
+        }),
+      );
+    if (url.includes("//aisubtitle.hdslb.com/x.json"))
+      return new Response(JSON.stringify({ body: [{ from: 0, to: 5, content: "足够长的内容。".repeat(30) }] }));
+    return new Response(llmResponse());
+  };
+  const deps = depsWith({ fetchImpl: fake });
+  const q = createQueue(deps);
+  const p1 = await q.submit("BVMULTI00001");
+  await q.onIdle();
+  const p2 = await q.submit("https://www.bilibili.com/video/BVMULTI00001/?p=2");
+  await q.onIdle();
+
+  assert.equal(viewCalls, 2, "请求 P2 时必须重新解析元数据");
+  assert.notEqual(q.get(p2)!.reportId, q.get(p1)!.reportId, "P2 不能复用 P1 的报告");
+  const row = deps.db.prepare("select cid from jobs where id = ?").get(p2) as { cid: number };
+  assert.equal(Number(row.cid), 22, "P2 必须落到 pages[1].cid");
+});
+
+test("LLM 返回非 JSON 时报告标记 degraded 并落库", async () => {
+  const fake = async (url: string) => {
+    if (url.includes("x/web-interface/view")) return new Response(metaResponse("BVDEGRAD0001"));
+    if (url.includes("x/player/v2"))
+      return new Response(
+        JSON.stringify({
+          code: 0,
+          data: { subtitle: { subtitles: [{ lan: "ai-zh", subtitle_url: "//aisubtitle.hdslb.com/x.json" }] } },
+        }),
+      );
+    if (url.includes("//aisubtitle.hdslb.com/x.json"))
+      return new Response(JSON.stringify({ body: [{ from: 0, to: 5, content: "足够长的内容。".repeat(30) }] }));
+    return new Response(
+      JSON.stringify({ choices: [{ message: { content: "我觉得这个视频很棒" } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }),
+    );
+  };
+  const deps = depsWith({ fetchImpl: fake });
+  const q = createQueue(deps);
+  const jobId = await q.submit("BVDEGRAD0001");
+  await q.onIdle();
+  const job = q.get(jobId)!;
+  assert.equal(job.status, "done");
+const row = deps.db.prepare("select degraded, page from reports where id = ?").get(job.reportId) as {
+    degraded: number;
+    page: number;
+  };
+  assert.equal(Number(row.degraded), 1);
+  assert.equal(Number(row.page), 1);
+});
+
+test("B站限流会先退避重试，不会直接掉进语音识别", async () => {
+  let playerCalls = 0;
+  const slept: number[] = [];
+  const fake = async (url: string) => {
+    if (url.includes("x/web-interface/view")) return new Response(metaResponse("BVLIMIT00001"));
+    if (url.includes("x/player/v2")) {
+      playerCalls++;
+      if (playerCalls === 1) return new Response(JSON.stringify({ code: -352 }));
+      return new Response(
+        JSON.stringify({
+          code: 0,
+          data: { subtitle: { subtitles: [{ lan: "ai-zh", subtitle_url: "//aisubtitle.hdslb.com/x.json" }] } },
+        }),
+      );
+    }
+    if (url.includes("//aisubtitle.hdslb.com/x.json"))
+      return new Response(JSON.stringify({ body: [{ from: 0, to: 5, content: "足够长的内容。".repeat(30) }] }));
+    return new Response(llmResponse());
+  };
+  let asrCalled = 0;
+  const deps = depsWith({
+    fetchImpl: fake,
+    sleep: async (ms: number) => {
+      slept.push(ms);
+    },
+    asrRunner: async () => {
+      asrCalled++;
+      return [];
+    },
+  });
+  const q = createQueue(deps);
+  const jobId = await q.submit("BVLIMIT00001");
+  await q.onIdle();
+  assert.equal(q.get(jobId)!.status, "done");
+  assert.equal(slept.length, 1);
+  assert.equal(playerCalls, 2);
+  assert.equal(asrCalled, 0);
+  const video = deps.db.prepare("select source from videos").get() as { source: string };
+  assert.equal(video.source, "subtitle");
+});
+
+test("没登录时走语音识别，报告里明说原因", async () => {
+  const fake = async (url: string) => {
+    if (url.includes("x/web-interface/view")) return new Response(metaResponse("BVNOLOG00001"));
+    if (url.includes("x/player/v2")) return new Response(JSON.stringify({ code: -101 }));
+    if (url.includes("playurl"))
+      return new Response(
+        JSON.stringify({ code: 0, data: { dash: { audio: [{ baseUrl: "https://a.bilivideo.com/1.m4s", bandwidth: 1 }] } } }),
+      );
+    if (url.startsWith("https://a.bilivideo.com/")) return new Response(new Uint8Array([1, 2, 3]));
+    return new Response(llmResponse());
+  };
+  const deps = depsWith({
+    withCookie: false,
+    fetchImpl: fake,
+    prepareAudio: async () => {},
+    asrRunner: async () => [{ from: 0, to: 30, text: "语音识别出来的内容".repeat(20) }],
+  });
+  const q = createQueue(deps);
+  const jobId = await q.submit("BVNOLOG00001");
+  await q.onIdle();
+  const job = q.get(jobId)!;
+  assert.equal(job.status, "done");
+  const payload = JSON.parse(
+    (deps.db.prepare("select payload_json from reports where id = ?").get(job.reportId) as { payload_json: string })
+      .payload_json,
+  ) as { caveats: string[] };
+  assert.match(payload.caveats[0], /登录/);
+});
+
+test("语音识别用的音频文件用完就删，不在磁盘上堆积", async () => {
+  const workDir = path.join("tmp", "work-cleanup");
+  fs.rmSync(workDir, { recursive: true, force: true });
+  const fake = async (url: string) => {
+    if (url.includes("x/web-interface/view")) return new Response(metaResponse("BVCLEAN00001"));
+    if (url.includes("x/player/v2")) return new Response(JSON.stringify({ code: -101 }));
+    if (url.includes("playurl"))
+      return new Response(
+        JSON.stringify({ code: 0, data: { dash: { audio: [{ baseUrl: "https://a.bilivideo.com/1.m4s", bandwidth: 1 }] } } }),
+      );
+    if (url.startsWith("https://a.bilivideo.com/")) return new Response(new Uint8Array([1, 2, 3]));
+    return new Response(llmResponse());
+  };
+  const deps = depsWith({
+    withCookie: false,
+    workDir,
+    fetchImpl: fake,
+    prepareAudio: async (_in: string, out: string) => fs.writeFileSync(out, "wav"),
+    asrRunner: async () => [{ from: 0, to: 30, text: "语音识别出来的内容".repeat(20) }],
+  });
+  const q = createQueue(deps);
+  await q.submit("BVCLEAN00001");
+  await q.onIdle();
+  const left = fs.existsSync(workDir) ? fs.readdirSync(workDir) : [];
+  fs.rmSync(workDir, { recursive: true, force: true });
+  assert.deepEqual(left, []);
 });

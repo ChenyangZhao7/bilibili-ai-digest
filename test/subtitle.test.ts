@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fetchSubtitle } from "../src/bilibili.ts";
+import { fetchSubtitle, parseVideoInput } from "../src/bilibili.ts";
 import {
   cuesToParagraphs,
   paragraphsToTimestampedText,
@@ -85,4 +85,28 @@ test("分块不丢段且每块在预算内", () => {
   const chunks = mergeParagraphsForChunks(paras, 1000);
   assert.equal(chunks.flat().length, 40);
   assert.ok(chunks.every((c) => c.reduce((n, p) => n + p.text.length, 0) <= 1000));
+});
+
+test("字幕地址不在白名单域名就拒绝，不去拉取", async () => {
+  const calls: string[] = [];
+  const fake = async (url: string) => {
+    calls.push(url);
+    if (url.includes("/x/player/v2")) {
+      return new Response(
+        JSON.stringify({
+          code: 0,
+          data: { subtitle: { subtitles: [{ lan: "ai-zh", subtitle_url: "//evil.example.com/x.json" }] } },
+        }),
+      );
+    }
+    return new Response(JSON.stringify({ body: [] }));
+  };
+  const res = await fetchSubtitle("BV1GJ411x7h7", 1, "SESSDATA=s", fake as never);
+  assert.equal(res.ok, false);
+  assert.equal(calls.length, 1, "不该去请求白名单外的地址");
+});
+
+test("伪造的 bilibili 域名不被当成 B站链接", () => {
+  assert.equal(parseVideoInput("https://evilbilibili.com/video/BV1GJ411x7h7").ok, false);
+  assert.equal(parseVideoInput("https://www.bilibili.com/video/BV1GJ411x7h7").ok, true);
 });

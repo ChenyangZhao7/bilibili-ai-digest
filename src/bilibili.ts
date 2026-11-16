@@ -1,4 +1,4 @@
-import type { FetchLike } from "./types.ts";
+import type { Cue, FetchLike } from "./types.ts";
 
 export type { FetchLike };
 
@@ -10,6 +10,7 @@ export type VideoMeta = {
   bvid: string;
   aid: number;
   cid: number;
+  page: number;
   title: string;
   owner: string;
   duration: number;
@@ -40,6 +41,29 @@ function biliError(kind: BiliError["kind"], message: string): Error {
 const BV_RE = /^BV[0-9A-Za-z]{10}$/;
 const AV_RE = /^av(\d+)$/i;
 
+export const MEDIA_HOST_SUFFIXES = [
+  "hdslb.com",
+  "bilivideo.com",
+  "bilivideo.cn",
+  "akamaized.net",
+  "szbdyd.com",
+  "bilibili.com",
+];
+
+export function hostAllowed(url: string, suffixes: string[]): boolean {
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  return suffixes.some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
+}
+
+function isBilibiliHost(host: string): boolean {
+  return host === "bilibili.com" || host.endsWith(".bilibili.com");
+}
+
 export function parseVideoInput(raw: string): VideoInput {
   const input = (raw ?? "").trim();
   if (!input) return { ok: false, reason: "输入是空的，粘一个 B站 链接试试" };
@@ -65,7 +89,7 @@ export function parseVideoInput(raw: string): VideoInput {
     return { ok: true, kind: "short", id: url.toString(), p };
   }
 
-  if (!host.endsWith("bilibili.com")) {
+  if (!isBilibiliHost(host)) {
     return { ok: false, reason: "认不出这个链接，支持 BV号 / av号 / b站视频页 / b23.tv" };
   }
 
@@ -104,7 +128,7 @@ type ViewResponse = {
     owner?: { name?: string };
     duration?: number;
     pic?: string;
-    pages?: { cid: number; page: number }[];
+    pages?: { cid: number; page: number; duration?: number }[];
   };
 };
 
@@ -133,16 +157,20 @@ export async function fetchVideoMeta(id: string, p: number, fetchImpl: FetchLike
   if (!data) throw biliError("http", "B站没有返回视频信息");
 
   const pages = data.pages ?? [];
-  const page = pages[p - 1] ?? pages[0];
-  if (!page) throw biliError("http", "这个视频没有可播放的分 P");
+  if (pages.length === 0) throw biliError("http", "这个视频没有可播放的分 P");
+  if (p > pages.length) {
+    throw biliError("http", `该视频只有 ${pages.length} 个分 P，链接里的 p=${p} 超出了范围`);
+  }
+  const page = pages[p - 1];
 
   return {
     bvid: data.bvid,
     aid: data.aid,
     cid: page.cid,
+    page: p,
     title: data.title,
     owner: data.owner?.name ?? "",
-    duration: data.duration ?? 0,
+    duration: page.duration ?? data.duration ?? 0,
     cover: data.pic ?? "",
     pageCount: pages.length,
   };
@@ -192,6 +220,9 @@ export async function fetchSubtitle(
   if (!picked.subtitle_url) return { ok: false, reason: "no_subtitle", detail: "字幕地址为空" };
 
   const url = picked.subtitle_url.startsWith("//") ? `https:${picked.subtitle_url}` : picked.subtitle_url;
+  if (!hostAllowed(url, MEDIA_HOST_SUFFIXES)) {
+    return { ok: false, reason: "http", detail: `字幕地址不在 B站域名下，拒绝访问：${url.slice(0, 60)}` };
+  }
   const subRes = await fetchImpl(url, { headers: BILI_HEADERS() });
   if (!subRes.ok) return { ok: false, reason: "http", detail: `字幕文件下载失败 HTTP ${subRes.status}` };
   const body = (await subRes.json()) as SubtitleBody;

@@ -71,7 +71,7 @@ test("报告列表、详情、删除", async () => {
     "insert into videos (bvid,cid,title,owner,duration,cover,source,transcript_json,transcript_text,fetched_at) values ('BV1',1,'标题','UP',60,'','subtitle','[]','',1)",
   ).run();
   db.prepare(
-    "insert into reports (id,bvid,cid,model,prompt_version,payload_json,markdown,tokens_in,tokens_out,created_at) values ('r1','BV1',1,'m','p','{\"tldr\":[\"x\"]}','# 报告',1,1,1)",
+    "insert into reports (id,bvid,cid,page,model,prompt_version,payload_json,markdown,tokens_in,tokens_out,degraded,created_at) values ('r1','BV1',1,2,'m','p','{\"tldr\":[\"x\"]}','# 报告',1,1,1,1)",
   ).run();
   const list = await fetch(`${base}/api/reports?q=标题`).then((r) => r.json());
   const one = await fetch(`${base}/api/reports/r1`).then((r) => r.json());
@@ -83,6 +83,8 @@ test("报告列表、详情、删除", async () => {
   assert.equal(list.items[0].markdown, undefined, "列表不应带正文");
   assert.equal(one.markdown, "# 报告");
   assert.equal(one.meta.title, "标题");
+  assert.equal(one.meta.page, 2);
+  assert.equal(one.degraded, true);
   assert.equal(one.payload.tldr[0], "x");
   assert.equal(typeof one.transcript, "string");
   assert.equal(del.ok, true);
