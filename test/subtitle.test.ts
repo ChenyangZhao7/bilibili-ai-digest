@@ -6,6 +6,7 @@ import {
   paragraphsToTimestampedText,
   secondsToClock,
   mergeParagraphsForChunks,
+  subtitleFitsVideo,
 } from "../src/subtitle.ts";
 import body from "./fixtures/subtitle-body.json" with { type: "json" };
 
@@ -87,8 +88,7 @@ test("分块不丢段且每块在预算内", () => {
   assert.ok(chunks.every((c) => c.reduce((n, p) => n + p.text.length, 0) <= 1000));
 });
 
-test("字幕地址不在白名单域名就拒绝，不去拉取", async () => {
-  const calls: string[] = [];
+test("字幕地址不在白名单域名就拒绝，不去拉取", async () => {  const calls: string[] = [];
   const fake = async (url: string) => {
     calls.push(url);
     if (url.includes("/x/player/v2")) {
@@ -109,4 +109,11 @@ test("字幕地址不在白名单域名就拒绝，不去拉取", async () => {
 test("伪造的 bilibili 域名不被当成 B站链接", () => {
   assert.equal(parseVideoInput("https://evilbilibili.com/video/BV1GJ411x7h7").ok, false);
   assert.equal(parseVideoInput("https://www.bilibili.com/video/BV1GJ411x7h7").ok, true);
+});
+
+test("字幕时长明显超过视频时长时判定为不可信", () => {
+  const videoDuration = 172;
+  assert.equal(subtitleFitsVideo([{ from: 0, to: 160, text: "a" }, { from: 160, to: 1606, text: "b" }], videoDuration), false);
+  assert.equal(subtitleFitsVideo([{ from: 0, to: 100, text: "a" }, { from: 100, to: 190, text: "b" }], videoDuration), true);
+  assert.equal(subtitleFitsVideo([{ from: 0, to: 50, text: "a" }], 0), true, "时长未知时不拦");
 });

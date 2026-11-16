@@ -16,7 +16,7 @@ import {
 import { getLlmConfig, hasLlmKey } from "./settings.ts";
 import { fetchSubtitle, fetchVideoMeta, parseVideoInput, resolveShortLink, type SubtitleResult } from "./bilibili.ts";
 import { cookieHeader, getCookie } from "./auth.ts";
-import { cuesToParagraphs, paragraphsToTimestampedText } from "./subtitle.ts";
+import { cuesToParagraphs, paragraphsToTimestampedText, subtitleFitsVideo } from "./subtitle.ts";
 import { summarize, renderMarkdown, PROMPT_VERSION } from "./llm.ts";
 import {
   downloadFile,
@@ -150,24 +150,30 @@ export async function runPipeline(
 
         let cues: Cue[];
         let source: "subtitle" | "asr";
+        const subtitleUsable = sub.ok && subtitleFitsVideo(sub.cues, meta.duration);
 
-        if (sub.ok) {
+        if (sub.ok && subtitleUsable) {
           cues = sub.cues;
           source = "subtitle";
         } else {
+          const reason = sub.ok ? "mismatch" : sub.reason;
           subtitleFallbackNote =
-            sub.reason === "not_logged_in"
-              ? "字幕没拿到（登录过期或未登录），下面的文字来自本机语音识别，可能有错。"
-              : sub.reason === "risk_control"
-                ? "B站限流，字幕暂时拿不到，下面的文字来自本机语音识别，可能有错。"
-                : "这个视频没有字幕，下面的文字来自本机语音识别，可能有错。";
+            reason === "mismatch"
+              ? "B站给这个视频挂的字幕和视频时长对不上（疑似复用了别的视频的字幕），下面的文字来自本机语音识别，可能有错。"
+              : reason === "not_logged_in"
+                ? "字幕没拿到（登录过期或未登录），下面的文字来自本机语音识别，可能有错。"
+                : reason === "risk_control"
+                  ? "B站限流，字幕暂时拿不到，下面的文字来自本机语音识别，可能有错。"
+                  : "这个视频没有字幕，下面的文字来自本机语音识别，可能有错。";
 
           const ready = deps.asrReady ?? (await ensureAsr()).ready;
           if (!ready) {
             throw new Error(
-              sub.reason === "not_logged_in"
-                ? "登录过期或没登录，去设置里扫码；本机语音识别组件也没装，装好后没字幕的视频也能处理"
-                : "缺少语音识别组件（约 1.5GB），去设置里一键安装，装好后点重试",
+              reason === "mismatch"
+                ? "这个视频的字幕和时长对不上（B站挂错了字幕），不敢拿来总结；本机语音识别组件也没装，装好后可以重试"
+                : reason === "not_logged_in"
+                  ? "登录过期或没登录，去设置里扫码；本机语音识别组件也没装，装好后没字幕的视频也能处理"
+                  : "缺少语音识别组件（约 1.5GB），去设置里一键安装，装好后点重试",
             );
           }
 

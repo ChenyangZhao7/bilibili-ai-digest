@@ -55,6 +55,20 @@ const multiMetaResponse = (bvid = "BVMULTI00001") =>
     },
   });
 
+const shortMetaResponse = (bvid: string, duration: number) =>
+  JSON.stringify({
+    code: 0,
+    data: {
+      bvid,
+      aid: 3,
+      title: "短视频",
+      owner: { name: "UP主" },
+      duration,
+      pic: "",
+      pages: [{ cid: 31, page: 1, duration }],
+    },
+  });
+
 const llmResponse = () =>
   JSON.stringify({
     choices: [
@@ -411,4 +425,80 @@ test("语音识别用的音频文件用完就删，不在磁盘上堆积", async
   const left = fs.existsSync(workDir) ? fs.readdirSync(workDir) : [];
   fs.rmSync(workDir, { recursive: true, force: true });
   assert.deepEqual(left, []);
+});
+
+test("字幕比视频长得多时判定不可信，且不入库", async () => {
+  const fake = async (url: string) => {
+    if (url.includes("x/web-interface/view")) return new Response(shortMetaResponse("BVMISMATCH01", 172));
+    if (url.includes("x/player/v2"))
+      return new Response(
+        JSON.stringify({
+          code: 0,
+          data: { subtitle: { subtitles: [{ lan: "ai-zh", subtitle_url: "//aisubtitle.hdslb.com/x.json" }] } },
+        }),
+      );
+    if (url.includes("//aisubtitle.hdslb.com/x.json"))
+      return new Response(
+        JSON.stringify({
+          body: [
+            { from: 0, to: 60, content: "这一段是别的视频的评测内容，".repeat(5) },
+            { from: 1500, to: 1606, content: "结尾还在讲完全不相干的东西。".repeat(5) },
+          ],
+        }),
+      );
+    return new Response("{}");
+  };
+  const deps = depsWith({ fetchImpl: fake, asrReady: false });
+  const q = createQueue(deps);
+  const jobId = await q.submit("BVMISMATCH01");
+  await q.onIdle();
+  const job = q.get(jobId)!;
+  assert.equal(job.status, "failed");
+  assert.match(job.error ?? "", /对不上/);
+  const videos = deps.db.prepare("select count(*) as n from videos").get() as { n: number };
+  assert.equal(Number(videos.n), 0, "不可信的字幕不能入库");
+});
+
+test("字幕不可信但装着语音识别时，改走识别并在报告里说明", async () => {
+  const fake = async (url: string) => {
+    if (url.includes("x/web-interface/view")) return new Response(shortMetaResponse("BVMISMATCH02", 172));
+    if (url.includes("x/player/v2"))
+      return new Response(
+        JSON.stringify({
+          code: 0,
+          data: { subtitle: { subtitles: [{ lan: "ai-zh", subtitle_url: "//aisubtitle.hdslb.com/x.json" }] } },
+        }),
+      );
+    if (url.includes("//aisubtitle.hdslb.com/x.json"))
+      return new Response(
+        JSON.stringify({ body: [{ from: 1500, to: 1606, content: "完全不相干的内容。".repeat(10) }] }),
+      );
+    if (url.includes("playurl"))
+      return new Response(
+        JSON.stringify({ code: 0, data: { dash: { audio: [{ baseUrl: "https://a.bilivideo.com/2.m4s", bandwidth: 1 }] } } }),
+      );
+    if (url.startsWith("https://a.bilivideo.com/")) return new Response(new Uint8Array([1, 2, 3]));
+    return new Response(llmResponse());
+  };
+  const deps = depsWith({
+    fetchImpl: fake,
+    prepareAudio: async () => {},
+    asrRunner: async () => [{ from: 0, to: 60, text: "真正属于这个视频的内容".repeat(20) }],
+  });
+  const q = createQueue(deps);
+  const jobId = await q.submit("BVMISMATCH02");
+  await q.onIdle();
+  const job = q.get(jobId)!;
+  assert.equal(job.status, "done");
+  const video = deps.db.prepare("select source, transcript_text from videos").get() as {
+    source: string;
+    transcript_text: string;
+  };
+  assert.equal(video.source, "asr");
+  assert.equal(video.transcript_text.includes("完全不相干"), false);
+  const payload = JSON.parse(
+    (deps.db.prepare("select payload_json from reports where id = ?").get(job.reportId) as { payload_json: string })
+      .payload_json,
+  ) as { caveats: string[] };
+  assert.match(payload.caveats[0], /对不上/);
 });

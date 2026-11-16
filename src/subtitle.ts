@@ -23,6 +23,12 @@ function splitLongCue(cue: Cue, size: number): Cue[] {
   return parts;
 }
 
+export function subtitleFitsVideo(cues: Cue[], duration: number): boolean {
+  if (!duration || duration <= 0) return true;
+  const maxTo = cues.reduce((max, cue) => Math.max(max, cue.to), 0);
+  return maxTo <= Math.max(duration + 30, duration * 1.2);
+}
+
 export function cuesToParagraphs(cues: Cue[]): Paragraph[] {
   const flat = cues
     .filter((c) => c.text.trim() !== "")
