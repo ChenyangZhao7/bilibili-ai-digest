@@ -1,105 +1,112 @@
-# 视频报告 · video-filter
+# Video Digest · bilibili-ai-digest
 
-**粘贴一个 B站 链接，几十秒后拿到一份带时间戳的可读报告**：讲了什么、值不值得看、哪几段值得点回去看。
+**English** | [中文](README.zh-CN.md)
 
-不想花 40 分钟看一期视频，但不想错过里面的信息——这个工具就是干这个的。
+**Paste a Bilibili link and get a readable, timestamped report in under a minute**: what it covers, whether it is worth watching, and which parts are worth jumping back into.
 
-- 有字幕的视频：走 B站字幕接口，几秒拿到全文
-- 没有字幕的视频：自动下载音频，用本机语音识别兜底（装一次组件，约 1.5GB）
-- 报告：一句话结论 + 分章节要点 + 值得点回去看的片段 + 关键名词 + 完整文字稿，所有时间戳都能点回原片
-- 全程只在你自己的电脑上跑：服务只监听 `127.0.0.1`，除文字稿发给**你自己配置的** AI 接口外，数据不出本机
+You do not want to spend 40 minutes on a video, but you do not want to miss what is in it. That is the whole job.
 
-## 快速开始
+- Videos with subtitles: read from Bilibili's subtitle API in seconds.
+- Videos without: download the audio and fall back to local speech recognition (one ~1.5 GB component, installed once).
+- The report: a one-line verdict, sectioned key points, clips worth revisiting, key names, and the full transcript. Every timestamp links back to the original.
+- Everything runs on your own machine: the server binds `127.0.0.1`, and nothing leaves it except the transcript you send to the AI endpoint you configured.
 
-1. 双击桌面上的「视频报告」，或双击项目里的 `start.bat`
-2. 浏览器打开 `http://127.0.0.1:4318`
-3. 首次使用去设置页做两件事：**扫码登录 B站**、**填一个 AI key**（默认 DeepSeek）
-4. 回首页粘链接 → 等进度 → 读报告
+## Quick start
 
-可选第三步：设置页最下面**装语音识别组件**。不装也能用，只是遇到没有字幕的视频会提示你去装。
+1. Double-click "视频报告" on the desktop, or `start.bat` in the project.
+2. Open `http://127.0.0.1:4318`.
+3. On first use, do two things on the settings page: **scan the QR code to log in to Bilibili** and **enter an AI key** (DeepSeek by default).
+4. Back on the home page, paste a link, wait, read the report.
 
-## 报告里有什么
+Optional third step: install the speech-recognition component at the bottom of the settings page. Without it the tool still works; videos with no subtitles will just point you there.
 
-| 区块 | 作用 |
+## What is in a report
+
+| Block | Purpose |
 |---|---|
-| 结论 | `不看` / `略看` / `值得看` 三档 + 一句话理由 |
-| 一句话看完 | 3～8 条最关键的事实与论点 |
-| 分章节 | 按内容分段，每段带可点击时间戳 |
-| 值得点回去看的片段 | 3～6 个高信息密度片段，附「为什么值得看」 |
-| 关键名词 | 视频里出现的人名、术语、公司名 |
-| 需要注意 | 信息缺口、立场提示、语音识别可能出错的地方 |
-| 完整文字稿 | 折叠区，可复制可校对 |
+| Verdict | `Skip` / `Skim` / `Worth watching` plus a one-line reason |
+| In one sentence | The 3–8 most important facts and arguments |
+| Sections | Grouped by content, each with clickable timestamps |
+| Clips worth revisiting | 3–6 information-dense moments, each with a reason |
+| Key names | People, terms and companies that appear in the video |
+| Caveats | Information gaps, stance warnings, places ASR may be wrong |
+| Full transcript | Collapsed, copyable, proofreadable |
 
-同一视频 24 小时内直接复用已有报告；想重来就勾「强制重新生成」。
+The same video reuses its report for 24 hours; tick "force regenerate" to redo it.
 
-## 常用操作
+## Everyday use
 
-- 链接形式都认：`bilibili.com/video/BV...`、`b23.tv/...`、纯 `BV号`、`av号`
-- 多 P 视频带 `?p=2` 就分析第 2P，报告里的时间戳也会带上 `p=2`
-- 历史报告在首页可搜（标题、UP 主、正文）
-- 设置页可切换任何 OpenAI 兼容接口（含本地 ollama）
+- All link forms work: `bilibili.com/video/BV...`, `b23.tv/...`, a bare `BV` id, an `av` id.
+- For multi-part videos, `?p=2` analyses part 2, and timestamps in the report carry `p=2`.
+- Past reports are searchable on the home page (title, uploader, body).
+- The settings page can point at any OpenAI-compatible endpoint, including local Ollama.
 
-## 不做什么
+## What it does not do
 
-- 不支持番剧、直播回放、课程
-- 不看画面：不抽帧、不认 PPT 里的字，只处理「说出来的话」
-- 不做自动订阅、批量导入
-- 不对局域网开放（只绑 `127.0.0.1`）
-- 不做账号体系
+- No bangumi, live replays or courses.
+- Does not look at the picture: no frame sampling, no reading text in slides, only what is said.
+- No auto-subscription or batch import.
+- Not exposed to the LAN (binds `127.0.0.1` only).
+- No accounts.
 
-## 技术栈
+## Stack
 
-Node 24（直接运行 TypeScript，无构建步骤）· Express 5 · `node:sqlite` · whisper.cpp · 原生 JS 单页前端 · 测试用 `node:test`，不依赖测试框架。
+Node 24 (runs TypeScript directly, no build step) · Express 5 · `node:sqlite` · whisper.cpp · plain-JS single-page frontend · `node:test` with no test framework.
 
 ```
-server.ts            HTTP 接口 + 静态文件
+server.ts            HTTP API + static files
 src/
-  queue.ts           单并发任务队列
-  pipeline.ts        抓取 → 分段 → 总结的流水线（断点续跑）
-  bilibili.ts        链接解析、元数据、字幕、音频地址
-  subtitle.ts        字幕与语音识别共用的分段逻辑
-  auth.ts            扫码登录
-  asr.ts             音频下载、转码、whisper 调用、CUDA→CPU 回落
-  llm.ts             分块、白名单校验、降级、markdown 渲染
-  install.ts         语音识别组件按需安装
+  queue.ts           single-concurrency job queue
+  pipeline.ts        fetch → segment → summarise (resumable)
+  bilibili.ts        link parsing, metadata, subtitles, audio URL
+  subtitle.ts        segmentation shared by subtitles and ASR
+  auth.ts            QR login
+  asr.ts             audio download, transcode, whisper call, CUDA→CPU fallback
+  llm.ts             chunking, allow-list checks, degrades, markdown rendering
+  install.ts         on-demand install of the ASR component
   db.ts / settings.ts
-public/              单页界面
-docs/superpowers/    设计文档与实施计划
+public/              single-page UI
+docs/superpowers/    design docs and implementation plans
 ```
 
-## 开发
+## Development
 
 ```powershell
-npm start                              # 启动
-npm test                               # 64 个测试
-npx tsc --noEmit                       # 类型检查（npm run typecheck）
-node scripts/smoke.ts BV1CFsE6pEqp     # 对正在跑的服务做端到端冒烟
+npm start                              # start
+npm test                               # 64 tests
+npx tsc --noEmit                       # type check (npm run typecheck)
+node scripts/smoke.ts BV1CFsE6pEqp     # end-to-end smoke test against a running server
 ```
 
-## 隐私
+## Privacy
 
-- B站 cookie、AI key、报告都在本机 `data/app.db`（SQLite），不进 git
-- 设置接口只返回掩码和登录状态，不回传 cookie
-- 删除 `data/app.db` = 清空所有报告和配置
-- 日志与错误信息统一过滤 `SESSDATA`、`Bearer`、`sk-` 之类的密钥片段
+- Bilibili cookies, the AI key and reports live in `data/app.db` (SQLite) on this machine and never enter git.
+- The settings API returns masks and login state, never the cookie.
+- Deleting `data/app.db` wipes every report and every setting.
+- Logs and errors filter `SESSDATA`, `Bearer`, `sk-` and similar secret fragments.
 
-## 常见问题
+## FAQ
 
-外部依赖导致的已知问题（B站 字幕接口乱发字幕、ASR 组件下载、多 P 行为等）单独记在 [`docs/known-issues.md`](docs/known-issues.md)。
-**抓不到字幕 / 提示登录过期**
-设置页重新扫码。没有字幕时会自动转语音识别，慢一些但不会中断。
+Known issues caused by external dependencies (Bilibili's subtitle API returning the wrong subtitles, ASR component downloads, multi-part behaviour) live in [`docs/known-issues.md`](docs/known-issues.md).
 
-**「B站限流了」**
-等一分钟再点重试。连续失败先歇会儿。
+**No subtitles / "login expired"**
+Scan the QR code again on the settings page. With no subtitles it falls back to speech recognition: slower, but it finishes.
 
-**语音识别组件下载不动**
-GitHub 和 HuggingFace 在国内经常抽风。按提示手动放文件：程序压缩包（`.zip`）放 `downloads/`，模型（`ggml-medium.bin`）放 `models/`，再点一次安装，已存在的文件会跳过。
+**"Bilibili is rate limiting"**
+Wait a minute and retry. After repeated failures, take a break.
 
-**「B站返回的字幕和视频对不上」**
-这不是你的错，是 B站 自己的 AI 字幕接口在出问题：同一个视频连续请求，会返回别的视频的字幕、广告乱码、甚至空字幕。程序现在会连取多次，只采用「重复出现且和标题匹配」的那一份；如果拿不到可信字幕，宁可报错也不会编一份报告。解决办法：装语音识别组件（设置页最下面），之后这类视频改从音频转文字。
+**The ASR component will not download**
+GitHub and HuggingFace are unreliable from mainland China. Follow the prompt and place the files by hand: the component archive (`.zip`) in `downloads/`, the model (`ggml-medium.bin`) in `models/`, then install again; existing files are skipped.
 
-**识别的文字有错**
-会错。BGM 大、多人抢话、方言都不太行；报告「需要注意」里会写明文字来自语音识别。
+**"The subtitles Bilibili returned do not match the video"**
+Not your fault — Bilibili's AI subtitle endpoint does this: repeated requests for one video can return another video's subtitles, ad garbage, or nothing. The tool now samples several times and keeps only a copy that repeats and matches the title; if nothing trustworthy arrives it reports an error rather than inventing a report. The fix: install the ASR component (bottom of the settings page) and these videos go through audio instead.
 
-**数据存在哪**
-`data/app.db`。`bin/`、`models/` 是可删的语音识别组件。
+**The recognised text has errors**
+It will. Loud music, people talking over each other and dialects are hard. The report's caveats section says when text came from speech recognition.
+
+**Where is the data**
+`data/app.db`. `bin/` and `models/` are the ASR component and can be deleted.
+
+## License
+
+MIT
